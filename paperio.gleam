@@ -58,7 +58,7 @@ import sgleam/style
 const tamanho = 20
 
 /// Lado de uma casa, em pixels.
-const lado_casa = 30
+const lado_casa = 20
 
 /// Quantidade de tiques por segundo.
 const tiques_por_segundo = 10
@@ -70,7 +70,7 @@ const duracao = 600
 const largura = 400
 
 /// Altura da tela, em pixels.
-const altura = 480
+const altura = 520
 
 // ----------------------------------------------------------------------
 // Tipos de dados
@@ -146,29 +146,51 @@ pub type Partida {
     poderes: List(PoderNoMapa),
     tiques: Int,
     proximo_poder: Int,
+    placares: List(Placar),
   )
 }
 
 /// A pontuação de um jogador. *jogador* indica seu número e *casas*
 /// representa a quantidade de casas que ele controla.
-type Placar {
+pub type Placar {
   Placar(jogador: Int, casas: Int)
 }
 
 /// O estado do jogo. Todos os estados guardam o gerador de números
 /// aleatórios utilizado durante a partida.
-type Estado {
+pub type Estado {
   /// Antes da primeira partida.
-  Abertura(gerador: random.Generator)
+  Abertura(gerador: random.Generator, imagens: ImagensPoderes)
   /// Durante uma partida.
-  EmPartida(gerador: random.Generator, partida: Partida)
+  EmPartida(
+    gerador: random.Generator,
+    imagens: ImagensPoderes,
+    partida: Partida,
+  )
   /// Depois de uma partida, com a pontuação dos jogadores.
-  Resultado(gerador: random.Generator, placares: List(Placar))
+  Resultado(
+    gerador: random.Generator,
+    imagens: ImagensPoderes,
+    placares: List(Placar),
+  )
 }
 
 // ----------------------------------------------------------------------
 // Mundo
 // ----------------------------------------------------------------------
+
+pub fn smain() {
+  mworld.create_from(inicio, min: 2, max: 2, to_image: desenha)
+  |> mworld.tick_rate(tiques_por_segundo)
+  |> mworld.on_tick(tique)
+  |> mworld.on_key_down(tecla)
+}
+
+/// Cria a abertura com o gerador aleatório e as imagens
+/// dos poderes. A partida sempre terá dois jogadores.
+fn inicio(env: Env, jogadores: List(mworld.Player)) -> Estado {
+  Abertura(env.random(env), carrega_imagens())
+}
 
 fn carrega_imagens() -> ImagensPoderes {
   ImagensPoderes(
@@ -179,6 +201,17 @@ fn carrega_imagens() -> ImagensPoderes {
       "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABwAAAAcCAYAAAByDd+UAAAELUlEQVR42r2Wz29UVRTHP+feOzOvM9OWRkAwREOIClGKweCPEEPUja7YGN0Q/wzjgo07ExP1n3ChIZHEjQs1JvVHAKMUqgRigj8o0hZop/PzvXfvPS5m6MxIp5UGfcnb3Pfe/dxzvud83wFAVYX//hIAUVUREX3v1JePJNXqwbTVQiUIYeBVu5X9HSHG+M3cXKwtr56f+fDkX4AIIO+fmtlLkR+ScnnK5znWWhBBAAU0xnvGKeCM4beFBc7Mzt5IyubI5++8Pe8AjdZPl8sTU83VWladnLDFpIQYgzGGPM2o3bqNbgFYMIZx50KpXN2Vp+2ngGsOAGO9z3NNymO2MlG1qkoMkVa9TqfZ7guwhSvEiAavEWI30d2UiYiILXTFyjoZ9eUVvPeICMYIKCOjFAHdKAUia+c1g+vGGDRG6ssrhBAwvbT6oPgROkZVch8H99zw6gNVMcaQpVk/MhGy3DNZLjFVGSNGvQtWKRXZOVkhzT3mX0CHIsyznE6r3YtW6OSe7RMVThx7mlcPP05UXdPSiJD5wHOPPcybLx7h0d0P0ErzTaFrQDGGVr1Bp9XGOUsn8+ycrPD60WkqYyWsMVhrQLqSiHShRWexVjj+zBPs37NjU6j5p/rWmAHYIapJCQ2eqErmPbmP5D6Q+0jmPUH72h5/tgfNcuwIqBuii9DOcx6crPZgRdI8UHKWUsHx0NQE2msR6elbTUqoKjEqVrqRcvZnLl1bZHwsGQ0UEXwI7No2zmvPH6SaFMl8wBrBx8i2SsKJY4fRno46UO3eB4wRYowYY7pQ4OrCMv8M1Aw6ax4iLxzYy0SlTCcbrjpV0F6z6dqarq31Dx1x1vDSk/swRu7qTzNkRdYw88tVao0WSdERhzbbtKdRVZw15D7yxcVfiVHv+s4Nv2xZqDX45LsLvHF0mvGx0pqGtxotPjt3CUXXNEzzwMvT+9i3eztZ5rtVDJw+O8fl+SXGxxJanQ2qNKqSFBw3V5t8/O0F6u2UorOAkuaeGyt1lmpNFmtNlmpNFlbqNNOsb3/A6TNzXLl+k0qpOJTu9dtiBFSsw4hQcJaCMwO3xUp/i9Nn5rh8/SblYoEwwlzNKH/sQ2eptzv4GAkhdk28d3d7M+BD5NMBWNzAyd2oB3egtxstPvr6R4zpeqsOPC86y/dXfuenq/Ms1pqbwjYE9jd11NspimLNcEKMCK00p9HJKBXcprBNgXeq1xoBZN3/oRHBGlm3QDYE9ptY1h0XNj7UOmvCuodwAGmaUq1W1VnL/ZoXu0bSnSDiwI/UAcxcmDUH9x+QCedCiHG0rdwTURERrvz5R0CMNb2OcICspun5cxcvLiXlyo4Ywv2ZeqVr5hhj1aeLWZbP3hl/BERfeevdPVoqHvKdjoDd4vA7OK51D+6SquaN1fNffXByfqBA/r9R/2++TjJoeEgdIQAAAABJRU5ErkJggg==",
     ),
   )
+}
+
+/// Desenha o *estado* do ponto de vista de *jogador*.
+fn desenha(estado: Estado, jogador: mworld.Player) -> Image {
+  tela(estado, mworld.player_index(jogador))
+}
+
+/// Trata a tecla e a identificação do jogador
+/// para processar os comandos do jogo.
+fn tecla(estado: Estado, jogador: mworld.Player, evento: key.Event) -> Estado {
+  processa_tecla(estado, mworld.player_index(jogador), evento)
 }
 
 // ----------------------------------------------------------------------
@@ -289,7 +322,9 @@ pub fn nova_partida() -> Partida {
     poderes: [],
     tiques: 0,
     proximo_poder: 80,
+    placares: [],
   )
+  |> atualizar_placares
 }
 
 pub fn nova_partida_examples() {
@@ -311,15 +346,101 @@ pub fn nova_partida_examples() {
 }
 
 // ----------------------------------------------------------------------
+// Teclas
+// ----------------------------------------------------------------------
+
+/// Devolve a direção que corresponde a *tecla* clicada.
+/// Devolve None se *tecla* não é uma seta.
+pub fn direcao(tecla: key.Event) -> Option(Direcao) {
+  case tecla {
+    key.ArrowUp -> Some(Cima)
+    key.ArrowDown -> Some(Baixo)
+    key.ArrowLeft -> Some(Esquerda)
+    key.ArrowRight -> Some(Direita)
+    _ -> None
+  }
+}
+
+pub fn processa_tecla(estado: Estado, numero: Int, tecla: key.Event) -> Estado {
+  case estado, tecla {
+    Abertura(gerador, imagens), key.Enter ->
+      EmPartida(gerador, imagens, nova_partida())
+    Resultado(gerador, imagens, jogadores), key.Enter ->
+      EmPartida(gerador, imagens, nova_partida())
+    EmPartida(gerador, imagens, partida), _ ->
+      case direcao(tecla) {
+        Some(dir) -> EmPartida(gerador, imagens, move(partida, numero, dir))
+        None -> estado
+      }
+    _, _ -> estado
+  }
+}
+
+// ----------------------------------------------------------------------
 // Tiques
 // ----------------------------------------------------------------------
 
-//pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
-//  let tiques = partida.tiques + 1
-//  case tiques >= duracao, partida.proximo_poder <= 1 {
-//   True, _ -> Resultado(gerador, imagens, partida.jogadres)
-// }
-//}
+/// Avança o tempo apenas quando há uma partida em andamento.
+pub fn tique(estado: Estado) -> Estado {
+  case estado {
+    EmPartida(gerador, imagens, partida) -> avanca(gerador, imagens, partida)
+    _ -> estado
+  }
+}
+
+/// Avança um tique da partida e mostra o resultado
+/// quando a duração é atingida.
+pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
+  let tiques = partida.tiques + 1
+
+  case tiques >= duracao, partida.proximo_poder <= 1 {
+    True, _ -> Resultado(gerador, imagens, partida.placares)
+    False, _ -> EmPartida(gerador, imagens, Partida(..partida, tiques: tiques))
+  }
+}
+
+/// Recalcula os placares da *partida* contando as casas
+/// de cada jogador. Mantém a ordem dos jogadores e
+/// preserva os demais campos da partida.
+pub fn atualizar_placares(partida: Partida) -> Partida {
+  let placares =
+    list.map(partida.jogadores, fn(jogador) {
+      let quantidade = conta_casas(partida, jogador)
+      Placar(jogador.id, quantidade)
+    })
+
+  Partida(..partida, placares: placares)
+}
+
+/// Conta as casas do mapa da *partida* que pertencem ao
+/// *jogador*. Devolve zero se ele não possuir nenhuma casa.
+pub fn conta_casas(partida: Partida, jogador: Jogador) -> Int {
+  list.count(partida.mapa, fn(casa) { casa.dono == Some(jogador.id) })
+}
+
+pub fn conta_casas_examples() {
+  let partida = nova_partida()
+
+  // Cada jogador começa com nove casas.
+  check.eq(conta_casas(partida, cria_jogador(1)), 9)
+  check.eq(conta_casas(partida, cria_jogador(2)), 9)
+
+  // Casas neutras e de outros jogadores não são contadas.
+  let pequena =
+    Partida(..partida, mapa: [
+      Casa(Posicao(0, 0), Some(1)),
+      Casa(Posicao(0, 1), None),
+      Casa(Posicao(0, 2), Some(2)),
+      Casa(Posicao(0, 3), Some(1)),
+    ])
+
+  check.eq(conta_casas(pequena, cria_jogador(1)), 2)
+  check.eq(conta_casas(pequena, cria_jogador(2)), 1)
+
+  // Nenhuma casa pertence ao jogador.
+  let neutra = Partida(..partida, mapa: cria_mapa())
+  check.eq(conta_casas(neutra, cria_jogador(1)), 0)
+}
 
 // ----------------------------------------------------------------------
 // Posições e movimentação
@@ -328,13 +449,6 @@ pub fn nova_partida_examples() {
 /// Verifica se uma posição está dentro dos limites do mapa.
 pub fn dentro_do_mapa(pos: Posicao) -> Bool {
   pos.lin >= 0 && pos.lin < tamanho && pos.col >= 0 && pos.col < tamanho
-}
-
-pub fn dentro_do_mapa_examples() {
-  check.eq(dentro_do_mapa(Posicao(0, 0)), True)
-  check.eq(dentro_do_mapa(Posicao(19, 19)), True)
-  check.eq(dentro_do_mapa(Posicao(-1, 5)), False)
-  check.eq(dentro_do_mapa(Posicao(20, 5)), False)
 }
 
 /// Retorna a posição resultante após uma movimentação, ficando na mesma
@@ -353,6 +467,115 @@ pub fn desloca(pos: Posicao, dir: Direcao) -> Posicao {
   }
 }
 
+/// Devolve o dono da casa na posição pos.
+/// Devolve None se a casa for neutra ou não estiver no mapa.
+pub fn dono_da_casa(mapa: List(Casa), pos: Posicao) -> Option(Int) {
+  case list.find(mapa, fn(casa) { casa.posicao == pos }) {
+    Ok(casa) -> casa.dono
+    Error(_) -> None
+  }
+}
+
+/// Move o jogador na direção escolhida. Se ele estiver esperando 
+/// para reaparecer, mantém a partida sem alterações.
+pub fn move(partida: Partida, jogador_id: Int, direcao: Direcao) -> Partida {
+  case
+    list.find(partida.jogadores, fn(j) {
+      j.id == jogador_id && j.reaparecimento == 0
+    })
+  {
+    Error(_) -> partida
+    Ok(jogador) -> mover_jogador(partida, jogador, direcao)
+  }
+}
+
+/// Atualiza a posição e o rastro do jogador.
+/// Se ele voltar ao próprio território com um rastro,
+/// transforma o caminho em território e limpa o rastro.
+pub fn mover_jogador(
+  partida: Partida,
+  jogador: Jogador,
+  direcao: Direcao,
+) -> Partida {
+  let nova_pos = desloca(jogador.posicao, direcao)
+  let voltou = dono_da_casa(partida.mapa, nova_pos) == Some(jogador.id)
+
+  let fecha = nova_pos != jogador.posicao && voltou && jogador.rastro != []
+
+  let mapa = case fecha {
+    True -> fechar_rastro(partida, jogador)
+    False -> partida.mapa
+  }
+
+  let rastro = case fecha {
+    True -> []
+    False -> atualizar_rastro(partida, jogador, nova_pos)
+  }
+
+  let jogadores =
+    list.map(partida.jogadores, fn(j) {
+      case j.id == jogador.id {
+        True -> Jogador(..j, posicao: nova_pos, rastro: rastro)
+        False -> j
+      }
+    })
+
+  Partida(..partida, mapa: mapa, jogadores: jogadores)
+  |> atualizar_placares
+}
+
+/// Fecha o rastro do jogador, ao voltar ao uma casa sua
+pub fn fechar_rastro(partida: Partida, jogador: Jogador) -> List(Casa) {
+  list.map(partida.mapa, fn(casa) {
+    case tem_rastro(casa.posicao, jogador.rastro) {
+      True -> Casa(..casa, dono: Some(jogador.id))
+      False -> casa
+    }
+  })
+}
+
+/// Mantém o rastro dentro do próprio território ou
+/// adiciona a posição quando o jogador está fora dele.
+pub fn atualizar_rastro(
+  partida: Partida,
+  jogador: Jogador,
+  pos: Posicao,
+) -> List(Posicao) {
+  case dono_da_casa(partida.mapa, pos) {
+    Some(dono) if dono == jogador.id -> jogador.rastro
+    _ -> adicionar_rastro(pos, jogador.rastro)
+  }
+}
+
+/// Retorna True se a posição *pos* já está no *rastro*,
+/// Retorna False caso contrário.
+pub fn tem_rastro(pos: Posicao, rastro: List(Posicao)) -> Bool {
+  case rastro {
+    [] -> False
+    [p, ..resto] -> p == pos || tem_rastro(pos, resto)
+  }
+}
+
+/// Adiciona a posição *pos* na lista *rastro*. Caso a
+/// posição já esteja na lista, não muda o rastro
+pub fn adicionar_rastro(pos: Posicao, rastro: List(Posicao)) -> List(Posicao) {
+  case tem_rastro(pos, rastro) {
+    True -> rastro
+    False -> [pos, ..rastro]
+  }
+}
+
+// ----------------------------------------------------------------------
+// Posições e movimentação - Exemplos
+// ----------------------------------------------------------------------
+
+pub fn dentro_do_mapa_examples() {
+  check.eq(dentro_do_mapa(Posicao(0, 0)), True)
+  check.eq(dentro_do_mapa(Posicao(19, 19)), True)
+  check.eq(dentro_do_mapa(Posicao(-1, 5)), False)
+  check.eq(dentro_do_mapa(Posicao(20, 5)), False)
+}
+
 pub fn desloca_examples() {
   check.eq(desloca(Posicao(5, 5), Cima), Posicao(4, 5))
   check.eq(desloca(Posicao(5, 5), Baixo), Posicao(6, 5))
@@ -361,31 +584,12 @@ pub fn desloca_examples() {
   check.eq(desloca(Posicao(0, 0), Cima), Posicao(0, 0))
 }
 
-pub fn dono_da_casa(mapa: List(Casa), pos: Posicao) -> Option(Int) {
-  case list.find(mapa, fn(casa) { casa.posicao == pos }) {
-    Ok(casa) -> casa.dono
-    Error(_) -> None
-  }
-}
-
 pub fn dono_da_casa_examples() {
   let partida = nova_partida()
 
   check.eq(dono_da_casa(partida.mapa, Posicao(17, 2)), Some(1))
   check.eq(dono_da_casa(partida.mapa, Posicao(2, 17)), Some(2))
   check.eq(dono_da_casa(partida.mapa, Posicao(10, 10)), None)
-}
-
-pub fn move(partida: Partida, id: Int, direcao: Direcao) -> Partida {
-  let jogadores =
-    list.map(partida.jogadores, fn(j) {
-      case j.id == id && j.reaparecimento == 0 {
-        True -> Jogador(..j, posicao: desloca(j.posicao, direcao))
-        False -> j
-      }
-    })
-
-  Partida(..partida, jogadores: jogadores)
 }
 
 pub fn move_examples() {
@@ -429,6 +633,25 @@ fn cor_casa(dono: Option(Int)) -> Color {
   }
 }
 
+/// Produz a cor de um rastro conforme seu proprietário.
+fn cor_rastro(dono: Option(Int)) -> Color {
+  case dono {
+    Some(1) -> color.springgreen
+    Some(2) -> color.powderblue
+    _ -> color.white
+  }
+}
+
+/// Desenha a tela do *estado* para o jogador *numero*.
+pub fn tela(estado: Estado, id: Int) -> Image {
+  let conteudo = case estado {
+    Abertura(_, _) -> tela_abertura(id)
+    EmPartida(_, imagens, partida) -> tela_partida(imagens, partida, id)
+    Resultado(_, _, jogadores) -> tela_resultado(jogadores, id)
+  }
+  image.overlay(conteudo, image.rectangle(largura, altura, fill.white))
+}
+
 fn desenha_casa(casa: Casa) -> Image {
   image.square(
     lado_casa,
@@ -441,6 +664,10 @@ fn desenha_casa(casa: Casa) -> Image {
       },
     ]),
   )
+}
+
+fn desenha_rastro(id: Int) -> Image {
+  image.square(lado_casa, style.fill(cor_rastro(Some(id))))
 }
 
 /// Coloca uma imagem no centro de uma posição do mapa.
@@ -478,11 +705,96 @@ pub fn grade(partida: Partida) -> Image {
       coloca_img(cena, casa.posicao, desenha_casa(casa))
     })
 
-  list.fold(partida.jogadores, com_casas, fn(cena, j) {
+  let com_rastro =
+    list.fold(partida.jogadores, com_casas, fn(cena, j) {
+      list.fold(j.rastro, cena, fn(imagem, pos) {
+        coloca_img(imagem, pos, desenha_rastro(j.id))
+      })
+    })
+
+  list.fold(partida.jogadores, com_rastro, fn(cena, j) {
     coloca_img(cena, j.posicao, desenha_jogador(j))
   })
 }
 
-pub fn mapa_teste() -> Image {
-  grade(nova_partida())
+// ----------------------------------------------------------------------
+// Desenho - Telas
+// ----------------------------------------------------------------------
+
+/// Mostra a identificação do jogador e como começar.
+pub fn tela_abertura(id: Int) -> Image {
+  image.above(
+    image.text("Disputa de Território", 32, fill.black),
+    image.above(
+      image.text(
+        "Você é o jogador " <> int.to_string(id),
+        22,
+        style.fill(cor(id)),
+      ),
+      image.text("Enter para começar. Setas para mover.", 20, fill.black),
+    ),
+  )
+}
+
+/// Mostra o tempo, os placares e o tabuleiro.
+pub fn tela_partida(
+  _imagens: ImagensPoderes,
+  partida: Partida,
+  id: Int,
+) -> Image {
+  let segundos =
+    { duracao - partida.tiques + tiques_por_segundo - 1 } / tiques_por_segundo
+
+  let placar =
+    list.fold(partida.placares, image.empty, fn(cena, p) {
+      let nome = case p.jogador == id {
+        True -> "Você"
+        False -> "Adversário"
+      }
+
+      image.beside(
+        cena,
+        image.text(
+          nome <> ": " <> int.to_string(p.casas) <> "   ",
+          20,
+          style.fill(cor(p.jogador)),
+        ),
+      )
+    })
+
+  image.above(
+    image.above(
+      image.text("Tempo: " <> int.to_string(segundos) <> " s", 24, fill.black),
+      placar,
+    ),
+    grade(partida),
+  )
+}
+
+/// Mostra os placares finais e permite reiniciar.
+pub fn tela_resultado(placares: List(Placar), id: Int) -> Image {
+  let placar =
+    list.fold(placares, image.empty, fn(cena, p) {
+      let nome = case p.jogador == id {
+        True -> "Você"
+        False -> "Adversário"
+      }
+
+      image.above(
+        cena,
+        image.text(
+          nome <> ": " <> int.to_string(p.casas) <> " casas",
+          24,
+          style.fill(cor(p.jogador)),
+        ),
+      )
+    })
+
+  image.above(
+    image.text("Fim da partida", 32, fill.black),
+    image.above(
+      placar,
+      image.text("Pressione Enter para jogar novamente", 20, fill.black),
+    ),
+  )
 }
