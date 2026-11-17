@@ -92,12 +92,12 @@ pub type Direcao {
 
 /// Uma casa do mapa. *posicao* indica sua localização na grade e *dono*
 /// indica o número do jogador que controla a casa, ou None se é neutra.
-type Casa {
+pub type Casa {
   Casa(posicao: Posicao, dono: Option(Int))
 }
 
 /// Os tipos de poderes que podem ser utilizados pelos jogadores.
-type TipoPoder {
+pub type TipoPoder {
   Expansao
   Velocidade
 }
@@ -108,7 +108,7 @@ pub type ImagensPoderes {
 
 /// Um poder disponível no mapa. *tipo* indica o efeito do poder e
 /// *posicao* indica a casa em que ele pode ser coletado.
-type PoderNoMapa {
+pub type PoderNoMapa {
   PoderNoMapa(tipo: TipoPoder, posicao: Posicao)
 }
 
@@ -116,7 +116,7 @@ type PoderNoMapa {
 /// casa atual, *direcoes* guarda as direções dos movimentos e *rastro*
 /// contém as casas percorridas fora do território. *casas_proprias6*
 /// guarda as casas próprias antes do início do rastro.
-type Jogador {
+pub type Jogador {
   Jogador(
     id: Int,
     posicao: Posicao,
@@ -139,7 +139,7 @@ type Jogador {
 /// *jogadores* guarda os participantes e *poderes* contém os poderes
 /// disponíveis. *tiques* conta o tempo desde o início da partida e
 /// *proximo_poder* indica os tiques restantes até surgir outro poder.
-type Partida {
+pub type Partida {
   Partida(
     mapa: List(Casa),
     jogadores: List(Jogador),
@@ -207,12 +207,271 @@ pub fn todas_as_casas() -> List(Posicao) {
   })
 }
 
+pub fn todas_as_casas_examples() {
+  check.eq(list.length(todas_as_casas()), 400)
+  check.eq(list.first(todas_as_casas()), Ok(Posicao(0, 0)))
+  check.eq(list.last(todas_as_casas()), Ok(Posicao(19, 19)))
+}
+
+/// Cria o mapa com todas as casas neutras.
+pub fn cria_mapa() -> List(Casa) {
+  list.map(todas_as_casas(), fn(posicao) { Casa(posicao, None) })
+}
+
+pub fn base_inicial(id: Int) -> List(Posicao) {
+  let colunas = case id {
+    1 -> sequencia(1, 3)
+    2 -> sequencia(tamanho - 4, tamanho - 2)
+    _ -> []
+  }
+
+  let linhas = case id {
+    1 -> sequencia(tamanho - 4, tamanho - 2)
+    2 -> sequencia(1, 3)
+    _ -> []
+  }
+
+  list.flat_map(linhas, fn(lin) {
+    list.map(colunas, fn(col) { Posicao(lin, col) })
+  })
+}
+
+pub fn base_inicial_examples() {
+  check.eq(list.length(base_inicial(1)), 9)
+  check.eq(list.length(base_inicial(2)), 9)
+  check.eq(list.contains(base_inicial(1), Posicao(17, 2)), True)
+  check.eq(list.contains(base_inicial(2), Posicao(2, 17)), True)
+}
+
+fn cria_jogador(id: Int) -> Jogador {
+  let base = base_inicial(id)
+
+  let posicao = case id {
+    1 -> Posicao(tamanho - 3, 2)
+    _ -> Posicao(2, tamanho - 3)
+  }
+
+  Jogador(
+    id: id,
+    posicao: posicao,
+    direcoes: [],
+    rastro: [],
+    casas_proprias: base,
+    base: base,
+    poderes_guardados: [],
+    velocidade_extra: 0,
+    velocidade: 5.0,
+    reaparecimento: 0,
+  )
+}
+
+pub fn nova_partida() -> Partida {
+  let base1 = base_inicial(1)
+  let base2 = base_inicial(2)
+
+  let mapa =
+    list.map(cria_mapa(), fn(casa) {
+      let dono = case
+        list.contains(base1, casa.posicao),
+        list.contains(base2, casa.posicao)
+      {
+        True, _ -> Some(1)
+        False, True -> Some(2)
+        _, _ -> None
+      }
+
+      Casa(..casa, dono: dono)
+    })
+
+  Partida(
+    mapa: mapa,
+    jogadores: [cria_jogador(1), cria_jogador(2)],
+    poderes: [],
+    tiques: 0,
+    proximo_poder: 80,
+  )
+}
+
+pub fn nova_partida_examples() {
+  let partida = nova_partida()
+
+  check.eq(list.length(partida.mapa), 400)
+  check.eq(list.length(partida.jogadores), 2)
+  check.eq(list.length(partida.poderes), 0)
+  check.eq(partida.tiques, 0)
+
+  let casas_jogador1 =
+    list.filter(partida.mapa, fn(casa) { casa.dono == Some(1) })
+
+  let casas_jogador2 =
+    list.filter(partida.mapa, fn(casa) { casa.dono == Some(2) })
+
+  check.eq(list.length(casas_jogador1), 9)
+  check.eq(list.length(casas_jogador2), 9)
+}
+
 // ----------------------------------------------------------------------
 // Tiques
 // ----------------------------------------------------------------------
 
-pub fn todas_as_casas_examples() {
-  check.eq(list.length(todas_as_casas()), 100)
-  check.eq(list.first(todas_as_casas()), Ok(Posicao(0, 0)))
-  check.eq(list.last(todas_as_casas()), Ok(Posicao(9, 9)))
+// ----------------------------------------------------------------------
+// Posições e movimentação
+// ----------------------------------------------------------------------
+
+/// Verifica se uma posição está dentro dos limites do mapa.
+pub fn dentro_do_mapa(pos: Posicao) -> Bool {
+  pos.lin >= 0 && pos.lin < tamanho && pos.col >= 0 && pos.col < tamanho
+}
+
+pub fn dentro_do_mapa_examples() {
+  check.eq(dentro_do_mapa(Posicao(0, 0)), True)
+  check.eq(dentro_do_mapa(Posicao(19, 19)), True)
+  check.eq(dentro_do_mapa(Posicao(-1, 5)), False)
+  check.eq(dentro_do_mapa(Posicao(20, 5)), False)
+}
+
+/// Retorna a posição resultante após uma movimentação, ficando na mesma
+/// posição caso o deslocamento saia do mapa
+pub fn desloca(pos: Posicao, dir: Direcao) -> Posicao {
+  let destino = case dir {
+    Cima -> Posicao(pos.lin - 1, pos.col)
+    Baixo -> Posicao(pos.lin + 1, pos.col)
+    Esquerda -> Posicao(pos.lin, pos.col - 1)
+    Direita -> Posicao(pos.lin, pos.col + 1)
+  }
+
+  case dentro_do_mapa(destino) {
+    True -> destino
+    False -> pos
+  }
+}
+
+pub fn desloca_examples() {
+  check.eq(desloca(Posicao(5, 5), Cima), Posicao(4, 5))
+  check.eq(desloca(Posicao(5, 5), Baixo), Posicao(6, 5))
+  check.eq(desloca(Posicao(5, 5), Esquerda), Posicao(5, 4))
+  check.eq(desloca(Posicao(5, 5), Direita), Posicao(5, 6))
+  check.eq(desloca(Posicao(0, 0), Cima), Posicao(0, 0))
+}
+
+pub fn dono_da_casa(mapa: List(Casa), pos: Posicao) -> Option(Int) {
+  case list.find(mapa, fn(casa) { casa.posicao == pos }) {
+    Ok(casa) -> casa.dono
+    Error(_) -> None
+  }
+}
+
+pub fn dono_da_casa_examples() {
+  let partida = nova_partida()
+
+  check.eq(dono_da_casa(partida.mapa, Posicao(17, 2)), Some(1))
+  check.eq(dono_da_casa(partida.mapa, Posicao(2, 17)), Some(2))
+  check.eq(dono_da_casa(partida.mapa, Posicao(10, 10)), None)
+}
+
+pub fn move(partida: Partida, id: Int, direcao: Direcao) -> Partida {
+  let jogadores =
+    list.map(partida.jogadores, fn(j) {
+      case j.id == id && j.reaparecimento == 0 {
+        True -> Jogador(..j, posicao: desloca(j.posicao, direcao))
+        False -> j
+      }
+    })
+
+  Partida(..partida, jogadores: jogadores)
+}
+
+pub fn move_examples() {
+  let partida = nova_partida()
+
+  let movida = move(partida, 1, Cima)
+
+  check.eq(list.map(movida.jogadores, fn(j) { j.posicao }), [
+    Posicao(16, 2),
+    Posicao(2, 17),
+  ])
+
+  check.eq(move(partida, 3, Cima), partida)
+}
+
+// ----------------------------------------------------------------------
+// Desenho
+// ----------------------------------------------------------------------
+
+/// Devolve a cor do jogador *numero*.
+pub fn cor(numero: Int) -> Color {
+  case numero {
+    1 -> color.green
+    2 -> color.blue
+    _ -> color.purple
+  }
+}
+
+pub fn cor_examples() {
+  check.eq(cor(1), color.green)
+  check.eq(cor(2), color.blue)
+  check.eq(cor(4), color.purple)
+}
+
+/// Produz a cor de uma casa conforme seu proprietário.
+fn cor_casa(dono: Option(Int)) -> Color {
+  case dono {
+    Some(1) -> color.green
+    Some(2) -> color.blue
+    _ -> color.white
+  }
+}
+
+fn desenha_casa(casa: Casa) -> Image {
+  image.square(
+    lado_casa,
+    style.join([
+      style.fill(cor_casa(casa.dono)),
+      style.stroke(color.gray),
+    ]),
+  )
+}
+
+/// Coloca uma imagem no centro de uma posição do mapa.
+fn coloca_img(img: Image, pos: Posicao, elemento: Image) -> Image {
+  image.place_image(
+    img,
+    pos.col * lado_casa + lado_casa / 2,
+    pos.lin * lado_casa + lado_casa / 2,
+    elemento,
+  )
+}
+
+/// Produz a imagem de um jogador.
+fn desenha_jogador(j: Jogador) -> Image {
+  image.square(
+    lado_casa - 8,
+    style.join([
+      style.fill(cor_casa(Some(j.id))),
+      style.stroke(color.black),
+    ]),
+  )
+}
+
+/// Produz a imagem do mapa com suas casas e jogadores.
+pub fn grade(partida: Partida) -> Image {
+  let fundo =
+    image.rectangle(
+      tamanho * lado_casa,
+      tamanho * lado_casa,
+      style.fill(color.white),
+    )
+
+  let com_casas =
+    list.fold(partida.mapa, fundo, fn(cena, casa) {
+      coloca_img(cena, casa.posicao, desenha_casa(casa))
+    })
+
+  list.fold(partida.jogadores, com_casas, fn(cena, j) {
+    coloca_img(cena, j.posicao, desenha_jogador(j))
+  })
+}
+
+pub fn mapa_teste() -> Image {
+  grade(nova_partida())
 }
