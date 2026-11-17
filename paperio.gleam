@@ -58,7 +58,7 @@ import sgleam/style
 const tamanho = 20
 
 /// Lado de uma casa, em pixels.
-const lado_casa = 20
+const lado_casa = 30
 
 /// Quantidade de tiques por segundo.
 const tiques_por_segundo = 10
@@ -314,6 +314,13 @@ pub fn nova_partida_examples() {
 // Tiques
 // ----------------------------------------------------------------------
 
+//pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
+//  let tiques = partida.tiques + 1
+//  case tiques >= duracao, partida.proximo_poder <= 1 {
+//   True, _ -> Resultado(gerador, imagens, partida.jogadres)
+// }
+//}
+
 // ----------------------------------------------------------------------
 // Posições e movimentação
 // ----------------------------------------------------------------------
@@ -427,7 +434,11 @@ fn desenha_casa(casa: Casa) -> Image {
     lado_casa,
     style.join([
       style.fill(cor_casa(casa.dono)),
-      style.stroke(color.gray),
+      case casa.dono {
+        Some(1) -> style.stroke(color.green)
+        Some(2) -> style.stroke(color.blue)
+        _ -> style.stroke(color.grey)
+      },
     ]),
   )
 }
