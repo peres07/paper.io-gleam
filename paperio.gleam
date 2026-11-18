@@ -40,6 +40,7 @@
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import sgleam/check
 import sgleam/color.{type Color}
 import sgleam/env.{type Env}
@@ -114,7 +115,7 @@ pub type PoderNoMapa {
 
 /// Um jogador da partida. *id* identifica o jogador, *posicao* indica sua
 /// casa atual, *direcoes* guarda as direções dos movimentos e *rastro*
-/// contém as casas percorridas fora do território. *casas_proprias6*
+/// contém as casas percorridas fora do território. *casas_proprias*
 /// guarda as casas próprias antes do início do rastro.
 pub type Jogador {
   Jogador(
@@ -395,7 +396,21 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
 
   case tiques >= duracao, partida.proximo_poder <= 1 {
     True, _ -> Resultado(gerador, imagens, partida.placares)
-    False, _ -> EmPartida(gerador, imagens, Partida(..partida, tiques: tiques))
+    False, _ -> {
+      let jogadores =
+        list.map(partida.jogadores, fn(j) {
+          case j.reaparecimento > 0 {
+            True -> Jogador(..j, reaparecimento: j.reaparecimento - 1)
+            False -> j
+          }
+        })
+
+      EmPartida(
+        gerador,
+        imagens,
+        Partida(..partida, tiques: tiques, jogadores: jogadores),
+      )
+    }
   }
 }
 
@@ -583,6 +598,62 @@ pub fn move_examples() {
   check.eq(move(partida, 3, Cima), partida)
 }
 
+/// Reinicia o jogador após ser eliminado. Posiciona-o no centro da base,
+/// limpa as direções, o rastro e os poderes guardados e restaura a
+/// velocidade padrão. Preserva o território conquistado e inicia
+/// a espera de dois segundos para reaparecer.
+pub fn reinicia_jogador(jogador: Jogador) -> Jogador {
+  let base = jogador.base
+  let jogador_inicial = cria_jogador(jogador.id)
+  let nova_posicao = jogador_inicial.posicao
+
+  Jogador(
+    id: jogador.id,
+    posicao: nova_posicao,
+    direcoes: [],
+    rastro: [],
+    casas_proprias: jogador.casas_proprias,
+    base: base,
+    poderes_guardados: [],
+    velocidade_extra: 0,
+    velocidade: 5.0,
+    reaparecimento: 2 * tiques_por_segundo,
+  )
+}
+
+pub fn reinicia_jogador_examples() {
+  let inicial = cria_jogador(1)
+  let jogador =
+    Jogador(
+      ..inicial,
+      posicao: Posicao(10, 10),
+      direcoes: [Cima],
+      rastro: [Posicao(10, 10)],
+      casas_proprias: [Posicao(15, 2), ..inicial.base],
+      velocidade_extra: 10,
+      velocidade: 7.5,
+    )
+
+  let reiniciado = reinicia_jogador(jogador)
+
+  check.eq(reiniciado.id, jogador.id)
+  check.eq(reiniciado.posicao, Posicao(17, 2))
+  check.eq(reiniciado.base, jogador.base)
+  check.eq(reiniciado.casas_proprias, jogador.casas_proprias)
+  check.eq(reiniciado.direcoes, [])
+  check.eq(reiniciado.rastro, [])
+  check.eq(reiniciado.poderes_guardados, [])
+  check.eq(reiniciado.velocidade_extra, 0)
+  check.eq(reiniciado.velocidade, 5.0)
+  check.eq(reiniciado.reaparecimento, 2 * tiques_por_segundo)
+
+  let jogador_2 = cria_jogador(2)
+  let reiniciado_2 =
+    reinicia_jogador(Jogador(..jogador_2, posicao: Posicao(10, 10)))
+
+  check.eq(reiniciado_2.posicao, Posicao(2, 17))
+}
+
 /// Atualiza a posição e o rastro do jogador.
 /// Se ele voltar ao próprio território com um rastro,
 /// transforma o caminho em território e limpa o rastro.
@@ -594,6 +665,10 @@ pub fn mover_jogador(
 ) -> Partida {
   let nova_pos =
     desloca(jogador.posicao, direcao, jogador.rastro, adversario.base)
+
+  let cortou_rastro =
+    nova_pos != jogador.posicao && contem_posicao(nova_pos, adversario.rastro)
+
   let voltou = dono_da_casa(partida.mapa, nova_pos) == Some(jogador.id)
 
   let fecha = nova_pos != jogador.posicao && voltou && jogador.rastro != []
@@ -610,9 +685,10 @@ pub fn mover_jogador(
 
   let jogadores =
     list.map(partida.jogadores, fn(j) {
-      case j.id == jogador.id {
-        True -> Jogador(..j, posicao: nova_pos, rastro: rastro)
-        False -> j
+      case j.id == jogador.id, j.id == adversario.id && cortou_rastro {
+        True, _ -> Jogador(..j, posicao: nova_pos, rastro: rastro)
+        False, True -> reinicia_jogador(j)
+        False, False -> j
       }
     })
 
@@ -866,7 +942,10 @@ pub fn grade(partida: Partida) -> Image {
     })
 
   list.fold(partida.jogadores, com_rastro, fn(cena, j) {
-    coloca_img(cena, j.posicao, desenha_jogador(j))
+    case j.reaparecimento == 0 {
+      True -> coloca_img(cena, j.posicao, desenha_jogador(j))
+      False -> cena
+    }
   })
 }
 
@@ -915,12 +994,37 @@ pub fn tela_partida(
       )
     })
 
+  let tabuleiro = grade(partida)
+
+  let tabuleiro = case
+    list.find(partida.jogadores, fn(j) { j.id == id && j.reaparecimento > 0 })
+  {
+    Ok(jogador) -> {
+      let segundos_restantes =
+        { jogador.reaparecimento + tiques_por_segundo - 1 } / tiques_por_segundo
+
+      let aviso =
+        image.overlay(
+          image.text(
+            "Reaparecendo em " <> int.to_string(segundos_restantes) <> " s",
+            20,
+            fill.black,
+          ),
+          image.rectangle(260, 48, fill.white),
+        )
+
+      image.overlay(aviso, tabuleiro)
+    }
+
+    Error(_) -> tabuleiro
+  }
+
   image.above(
     image.above(
       image.text("Tempo: " <> int.to_string(segundos) <> " s", 24, fill.black),
       placar,
     ),
-    grade(partida),
+    tabuleiro,
   )
 }
 
