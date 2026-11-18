@@ -480,6 +480,7 @@ pub fn desloca(
   dir: Direcao,
   rastro: List(Posicao),
   base_adversario: List(Posicao),
+  adversario_pos: Posicao,
 ) -> Posicao {
   let destino = case dir {
     Cima -> Posicao(pos.lin - 1, pos.col)
@@ -491,64 +492,86 @@ pub fn desloca(
   case
     dentro_do_mapa(destino),
     contem_posicao(destino, rastro),
-    contem_posicao(destino, base_adversario)
+    contem_posicao(destino, base_adversario),
+    destino == adversario_pos
   {
-    True, False, False -> destino
-    _, _, _ -> pos
+    True, False, False, False -> destino
+    _, _, _, _ -> pos
   }
 }
 
 pub fn desloca_examples() {
+  let pos = Posicao(5, 5)
+  let adversario_distante = Posicao(12, 12)
+
   // Movimentação sem rastro.
-  check.eq(desloca(Posicao(5, 5), Cima, [], []), Posicao(4, 5))
-  check.eq(desloca(Posicao(5, 5), Baixo, [], []), Posicao(6, 5))
-  check.eq(desloca(Posicao(5, 5), Esquerda, [], []), Posicao(5, 4))
-  check.eq(desloca(Posicao(5, 5), Direita, [], []), Posicao(5, 6))
+  check.eq(desloca(pos, Cima, [], [], adversario_distante), Posicao(4, 5))
+  check.eq(desloca(pos, Baixo, [], [], adversario_distante), Posicao(6, 5))
+  check.eq(desloca(pos, Esquerda, [], [], adversario_distante), Posicao(5, 4))
+  check.eq(desloca(pos, Direita, [], [], adversario_distante), Posicao(5, 6))
 
   // Movimentação nas bordas do mapa.
-  check.eq(desloca(Posicao(0, 0), Cima, [], []), Posicao(0, 0))
-  check.eq(desloca(Posicao(0, 0), Esquerda, [], []), Posicao(0, 0))
-  check.eq(desloca(Posicao(19, 19), Baixo, [], []), Posicao(19, 19))
-  check.eq(desloca(Posicao(19, 19), Direita, [], []), Posicao(19, 19))
+  let canto_superior = Posicao(0, 0)
+  let canto_inferior = Posicao(19, 19)
+
+  check.eq(
+    desloca(canto_superior, Cima, [], [], adversario_distante),
+    canto_superior,
+  )
+  check.eq(
+    desloca(canto_superior, Esquerda, [], [], adversario_distante),
+    canto_superior,
+  )
+  check.eq(
+    desloca(canto_inferior, Baixo, [], [], adversario_distante),
+    canto_inferior,
+  )
+  check.eq(
+    desloca(canto_inferior, Direita, [], [], adversario_distante),
+    canto_inferior,
+  )
 
   // Movimento bloqueado pelo próprio rastro.
-  check.eq(desloca(Posicao(5, 5), Cima, [Posicao(4, 5)], []), Posicao(5, 5))
-  check.eq(desloca(Posicao(5, 5), Baixo, [Posicao(6, 5)], []), Posicao(5, 5))
-  check.eq(desloca(Posicao(5, 5), Esquerda, [Posicao(5, 4)], []), Posicao(5, 5))
-  check.eq(desloca(Posicao(5, 5), Direita, [Posicao(5, 6)], []), Posicao(5, 5))
+  check.eq(desloca(pos, Cima, [Posicao(4, 5)], [], adversario_distante), pos)
+  check.eq(desloca(pos, Baixo, [Posicao(6, 5)], [], adversario_distante), pos)
+  check.eq(
+    desloca(pos, Esquerda, [Posicao(5, 4)], [], adversario_distante),
+    pos,
+  )
+  check.eq(desloca(pos, Direita, [Posicao(5, 6)], [], adversario_distante), pos)
 
   // Movimento bloqueado por uma posição no meio do rastro.
   check.eq(
     desloca(
-      Posicao(5, 5),
+      pos,
       Direita,
-      [
-        Posicao(3, 3),
-        Posicao(5, 6),
-        Posicao(8, 8),
-      ],
+      [Posicao(3, 3), Posicao(5, 6), Posicao(8, 8)],
       [],
+      adversario_distante,
     ),
-    Posicao(5, 5),
+    pos,
   )
 
   // Movimento permitido quando o destino não pertence ao rastro.
   check.eq(
     desloca(
-      Posicao(5, 5),
+      pos,
       Direita,
-      [
-        Posicao(4, 5),
-        Posicao(5, 4),
-        Posicao(6, 5),
-      ],
+      [Posicao(4, 5), Posicao(5, 4), Posicao(6, 5)],
       [],
+      adversario_distante,
     ),
     Posicao(5, 6),
   )
 
   // Movimento permitido com rastro distante.
-  check.eq(desloca(Posicao(5, 5), Cima, [Posicao(10, 10)], []), Posicao(4, 5))
+  check.eq(
+    desloca(pos, Cima, [Posicao(10, 10)], [], adversario_distante),
+    Posicao(4, 5),
+  )
+
+  // Movimento bloqueado quando o adversário ocupa o destino.
+  check.eq(desloca(pos, Direita, [], [], Posicao(5, 6)), pos)
 }
 
 /// Devolve o dono da casa na posição pos.
@@ -664,7 +687,13 @@ pub fn mover_jogador(
   adversario: Jogador,
 ) -> Partida {
   let nova_pos =
-    desloca(jogador.posicao, direcao, jogador.rastro, adversario.base)
+    desloca(
+      jogador.posicao,
+      direcao,
+      jogador.rastro,
+      adversario.base,
+      adversario.posicao,
+    )
 
   let cortou_rastro =
     nova_pos != jogador.posicao && contem_posicao(nova_pos, adversario.rastro)
