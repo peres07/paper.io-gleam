@@ -616,17 +616,20 @@ pub fn mover_jogador(
       }
     })
 
-  Partida(..partida, mapa: mapa, jogadores: jogadores)
-  |> atualizar_placares
+  let atualizada = Partida(..partida, mapa: mapa, jogadores: jogadores)
+
+  case fecha {
+    True -> atualizar_placares(atualizada)
+    False -> atualizada
+  }
 }
 
 /// Fecha o rastro do jogador, ao voltar ao uma casa sua
 pub fn fechar_rastro(partida: Partida, jogador: Jogador) -> List(Casa) {
+  let exteriores = casas_exteriores(partida, jogador)
+
   list.map(partida.mapa, fn(casa) {
-    case contem_posicao(casa.posicao, jogador.rastro) {
-      True -> Casa(..casa, dono: Some(jogador.id))
-      False -> casa
-    }
+    conquistar_casa(partida, jogador, exteriores, casa)
   })
 }
 
@@ -659,6 +662,100 @@ pub fn adicionar_rastro(pos: Posicao, rastro: List(Posicao)) -> List(Posicao) {
     True -> rastro
     False -> [pos, ..rastro]
   }
+}
+
+// ----------------------------------------------------------------------
+// Flood Fill
+// ----------------------------------------------------------------------
+
+/// Devolve as posições acima, abaixo, à esquerda e à
+/// direita de pos, descartando as que ficam fora do mapa.
+pub fn casas_vizinhas(pos: Posicao) -> List(Posicao) {
+  let candidatas = [
+    Posicao(pos.lin - 1, pos.col),
+    Posicao(pos.lin + 1, pos.col),
+    Posicao(pos.lin, pos.col - 1),
+    Posicao(pos.lin, pos.col + 1),
+  ]
+
+  list.filter(candidatas, dentro_do_mapa)
+}
+
+pub fn flood_fill(
+  partida: Partida,
+  jogador: Jogador,
+  pendentes: List(Posicao),
+  visitadas: List(Posicao),
+) -> List(Posicao) {
+  case pendentes {
+    [] -> visitadas
+    [pos, ..resto] -> {
+      let exterior =
+        list.filter(casas_vizinhas(pos), fn(vizinha) {
+          dono_da_casa(partida.mapa, vizinha) != Some(jogador.id)
+          && !contem_posicao(vizinha, jogador.rastro)
+          && !contem_posicao(vizinha, visitadas)
+        })
+      let novas_pendentes =
+        list.fold(exterior, resto, fn(lista, pos) { [pos, ..lista] })
+
+      let novas_visitadas =
+        list.fold(exterior, visitadas, fn(lista, pos) { [pos, ..lista] })
+
+      flood_fill(partida, jogador, novas_pendentes, novas_visitadas)
+    }
+  }
+}
+
+/// Devolve as posições alcançavéis pelas bordas sem
+/// atravesar o território nem a borda do jogador
+pub fn casas_exteriores(partida: Partida, jogador: Jogador) -> List(Posicao) {
+  let bordas =
+    list.filter(todas_as_casas(), fn(pos) {
+      let borda =
+        pos.lin == 0
+        || pos.lin == tamanho - 1
+        || pos.col == 0
+        || pos.col == tamanho - 1
+
+      borda
+      && dono_da_casa(partida.mapa, pos) != Some(jogador.id)
+      && !contem_posicao(pos, jogador.rastro)
+    })
+
+  flood_fill(partida, jogador, bordas, bordas)
+}
+
+pub fn conquistar_casa(
+  partida: Partida,
+  jogador: Jogador,
+  exteriores: List(Posicao),
+  casa: Casa,
+) -> Casa {
+  let conquistar = !contem_posicao(casa.posicao, exteriores)
+
+  case conquistar {
+    True -> Casa(..casa, dono: Some(jogador.id))
+    False -> casa
+  }
+}
+
+// ----------------------------------------------------------------------
+// Flood Fill - Examples
+// ----------------------------------------------------------------------
+
+pub fn vizinhas_examples() {
+  check.eq(casas_vizinhas(Posicao(0, 0)), [
+    Posicao(1, 0),
+    Posicao(0, 1),
+  ])
+
+  check.eq(casas_vizinhas(Posicao(5, 5)), [
+    Posicao(4, 5),
+    Posicao(6, 5),
+    Posicao(5, 4),
+    Posicao(5, 6),
+  ])
 }
 
 // ----------------------------------------------------------------------
