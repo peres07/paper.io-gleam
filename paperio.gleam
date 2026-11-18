@@ -453,7 +453,12 @@ pub fn dentro_do_mapa(pos: Posicao) -> Bool {
 
 /// Retorna a posição resultante após uma movimentação, ficando na mesma
 /// posição caso o deslocamento saia do mapa
-pub fn desloca(pos: Posicao, dir: Direcao, rastro: List(Posicao)) -> Posicao {
+pub fn desloca(
+  pos: Posicao,
+  dir: Direcao,
+  rastro: List(Posicao),
+  base_adversario: List(Posicao),
+) -> Posicao {
   let destino = case dir {
     Cima -> Posicao(pos.lin - 1, pos.col)
     Baixo -> Posicao(pos.lin + 1, pos.col)
@@ -461,9 +466,13 @@ pub fn desloca(pos: Posicao, dir: Direcao, rastro: List(Posicao)) -> Posicao {
     Direita -> Posicao(pos.lin, pos.col + 1)
   }
 
-  case dentro_do_mapa(destino), tem_rastro(destino, rastro) {
-    True, False -> destino
-    _, _ -> pos
+  case
+    dentro_do_mapa(destino),
+    contem_posicao(destino, rastro),
+    contem_posicao(destino, base_adversario)
+  {
+    True, False, False -> destino
+    _, _, _ -> pos
   }
 }
 
@@ -485,7 +494,11 @@ pub fn move(partida: Partida, jogador_id: Int, direcao: Direcao) -> Partida {
     })
   {
     Error(_) -> partida
-    Ok(jogador) -> mover_jogador(partida, jogador, direcao)
+    Ok(jogador) ->
+      case list.find(partida.jogadores, fn(j) { j.id != jogador.id }) {
+        Ok(adversario) -> mover_jogador(partida, jogador, direcao, adversario)
+        Error(_) -> partida
+      }
   }
 }
 
@@ -496,8 +509,10 @@ pub fn mover_jogador(
   partida: Partida,
   jogador: Jogador,
   direcao: Direcao,
+  adversario: Jogador,
 ) -> Partida {
-  let nova_pos = desloca(jogador.posicao, direcao, jogador.rastro)
+  let nova_pos =
+    desloca(jogador.posicao, direcao, jogador.rastro, adversario.base)
   let voltou = dono_da_casa(partida.mapa, nova_pos) == Some(jogador.id)
 
   let fecha = nova_pos != jogador.posicao && voltou && jogador.rastro != []
@@ -527,7 +542,7 @@ pub fn mover_jogador(
 /// Fecha o rastro do jogador, ao voltar ao uma casa sua
 pub fn fechar_rastro(partida: Partida, jogador: Jogador) -> List(Casa) {
   list.map(partida.mapa, fn(casa) {
-    case tem_rastro(casa.posicao, jogador.rastro) {
+    case contem_posicao(casa.posicao, jogador.rastro) {
       True -> Casa(..casa, dono: Some(jogador.id))
       False -> casa
     }
@@ -547,19 +562,19 @@ pub fn atualizar_rastro(
   }
 }
 
-/// Retorna True se a posição *pos* já está no *rastro*,
+/// Retorna True se a posição *pos* já está em *posicoes*,
 /// Retorna False caso contrário.
-pub fn tem_rastro(pos: Posicao, rastro: List(Posicao)) -> Bool {
-  case rastro {
+pub fn contem_posicao(pos: Posicao, posicoes: List(Posicao)) -> Bool {
+  case posicoes {
     [] -> False
-    [p, ..resto] -> p == pos || tem_rastro(pos, resto)
+    [p, ..resto] -> p == pos || contem_posicao(pos, resto)
   }
 }
 
 /// Adiciona a posição *pos* na lista *rastro*. Caso a
 /// posição já esteja na lista, não muda o rastro
 pub fn adicionar_rastro(pos: Posicao, rastro: List(Posicao)) -> List(Posicao) {
-  case tem_rastro(pos, rastro) {
+  case contem_posicao(pos, rastro) {
     True -> rastro
     False -> [pos, ..rastro]
   }
@@ -578,45 +593,55 @@ pub fn dentro_do_mapa_examples() {
 
 pub fn desloca_examples() {
   // Movimentação sem rastro.
-  check.eq(desloca(Posicao(5, 5), Cima, []), Posicao(4, 5))
-  check.eq(desloca(Posicao(5, 5), Baixo, []), Posicao(6, 5))
-  check.eq(desloca(Posicao(5, 5), Esquerda, []), Posicao(5, 4))
-  check.eq(desloca(Posicao(5, 5), Direita, []), Posicao(5, 6))
+  check.eq(desloca(Posicao(5, 5), Cima, [], []), Posicao(4, 5))
+  check.eq(desloca(Posicao(5, 5), Baixo, [], []), Posicao(6, 5))
+  check.eq(desloca(Posicao(5, 5), Esquerda, [], []), Posicao(5, 4))
+  check.eq(desloca(Posicao(5, 5), Direita, [], []), Posicao(5, 6))
 
   // Movimentação nas bordas do mapa.
-  check.eq(desloca(Posicao(0, 0), Cima, []), Posicao(0, 0))
-  check.eq(desloca(Posicao(0, 0), Esquerda, []), Posicao(0, 0))
-  check.eq(desloca(Posicao(19, 19), Baixo, []), Posicao(19, 19))
-  check.eq(desloca(Posicao(19, 19), Direita, []), Posicao(19, 19))
+  check.eq(desloca(Posicao(0, 0), Cima, [], []), Posicao(0, 0))
+  check.eq(desloca(Posicao(0, 0), Esquerda, [], []), Posicao(0, 0))
+  check.eq(desloca(Posicao(19, 19), Baixo, [], []), Posicao(19, 19))
+  check.eq(desloca(Posicao(19, 19), Direita, [], []), Posicao(19, 19))
 
   // Movimento bloqueado pelo próprio rastro.
-  check.eq(desloca(Posicao(5, 5), Cima, [Posicao(4, 5)]), Posicao(5, 5))
-  check.eq(desloca(Posicao(5, 5), Baixo, [Posicao(6, 5)]), Posicao(5, 5))
-  check.eq(desloca(Posicao(5, 5), Esquerda, [Posicao(5, 4)]), Posicao(5, 5))
-  check.eq(desloca(Posicao(5, 5), Direita, [Posicao(5, 6)]), Posicao(5, 5))
+  check.eq(desloca(Posicao(5, 5), Cima, [Posicao(4, 5)], []), Posicao(5, 5))
+  check.eq(desloca(Posicao(5, 5), Baixo, [Posicao(6, 5)], []), Posicao(5, 5))
+  check.eq(desloca(Posicao(5, 5), Esquerda, [Posicao(5, 4)], []), Posicao(5, 5))
+  check.eq(desloca(Posicao(5, 5), Direita, [Posicao(5, 6)], []), Posicao(5, 5))
 
   // Movimento bloqueado por uma posição no meio do rastro.
   check.eq(
-    desloca(Posicao(5, 5), Direita, [
-      Posicao(3, 3),
-      Posicao(5, 6),
-      Posicao(8, 8),
-    ]),
+    desloca(
+      Posicao(5, 5),
+      Direita,
+      [
+        Posicao(3, 3),
+        Posicao(5, 6),
+        Posicao(8, 8),
+      ],
+      [],
+    ),
     Posicao(5, 5),
   )
 
   // Movimento permitido quando o destino não pertence ao rastro.
   check.eq(
-    desloca(Posicao(5, 5), Direita, [
-      Posicao(4, 5),
-      Posicao(5, 4),
-      Posicao(6, 5),
-    ]),
+    desloca(
+      Posicao(5, 5),
+      Direita,
+      [
+        Posicao(4, 5),
+        Posicao(5, 4),
+        Posicao(6, 5),
+      ],
+      [],
+    ),
     Posicao(5, 6),
   )
 
   // Movimento permitido com rastro distante.
-  check.eq(desloca(Posicao(5, 5), Cima, [Posicao(10, 10)]), Posicao(4, 5))
+  check.eq(desloca(Posicao(5, 5), Cima, [Posicao(10, 10)], []), Posicao(4, 5))
 }
 
 pub fn dono_da_casa_examples() {
