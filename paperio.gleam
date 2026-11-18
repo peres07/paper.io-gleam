@@ -451,6 +451,13 @@ pub fn dentro_do_mapa(pos: Posicao) -> Bool {
   pos.lin >= 0 && pos.lin < tamanho && pos.col >= 0 && pos.col < tamanho
 }
 
+pub fn dentro_do_mapa_examples() {
+  check.eq(dentro_do_mapa(Posicao(0, 0)), True)
+  check.eq(dentro_do_mapa(Posicao(19, 19)), True)
+  check.eq(dentro_do_mapa(Posicao(-1, 5)), False)
+  check.eq(dentro_do_mapa(Posicao(20, 5)), False)
+}
+
 /// Retorna a posição resultante após uma movimentação, ficando na mesma
 /// posição caso o deslocamento saia do mapa
 pub fn desloca(
@@ -476,6 +483,59 @@ pub fn desloca(
   }
 }
 
+pub fn desloca_examples() {
+  // Movimentação sem rastro.
+  check.eq(desloca(Posicao(5, 5), Cima, [], []), Posicao(4, 5))
+  check.eq(desloca(Posicao(5, 5), Baixo, [], []), Posicao(6, 5))
+  check.eq(desloca(Posicao(5, 5), Esquerda, [], []), Posicao(5, 4))
+  check.eq(desloca(Posicao(5, 5), Direita, [], []), Posicao(5, 6))
+
+  // Movimentação nas bordas do mapa.
+  check.eq(desloca(Posicao(0, 0), Cima, [], []), Posicao(0, 0))
+  check.eq(desloca(Posicao(0, 0), Esquerda, [], []), Posicao(0, 0))
+  check.eq(desloca(Posicao(19, 19), Baixo, [], []), Posicao(19, 19))
+  check.eq(desloca(Posicao(19, 19), Direita, [], []), Posicao(19, 19))
+
+  // Movimento bloqueado pelo próprio rastro.
+  check.eq(desloca(Posicao(5, 5), Cima, [Posicao(4, 5)], []), Posicao(5, 5))
+  check.eq(desloca(Posicao(5, 5), Baixo, [Posicao(6, 5)], []), Posicao(5, 5))
+  check.eq(desloca(Posicao(5, 5), Esquerda, [Posicao(5, 4)], []), Posicao(5, 5))
+  check.eq(desloca(Posicao(5, 5), Direita, [Posicao(5, 6)], []), Posicao(5, 5))
+
+  // Movimento bloqueado por uma posição no meio do rastro.
+  check.eq(
+    desloca(
+      Posicao(5, 5),
+      Direita,
+      [
+        Posicao(3, 3),
+        Posicao(5, 6),
+        Posicao(8, 8),
+      ],
+      [],
+    ),
+    Posicao(5, 5),
+  )
+
+  // Movimento permitido quando o destino não pertence ao rastro.
+  check.eq(
+    desloca(
+      Posicao(5, 5),
+      Direita,
+      [
+        Posicao(4, 5),
+        Posicao(5, 4),
+        Posicao(6, 5),
+      ],
+      [],
+    ),
+    Posicao(5, 6),
+  )
+
+  // Movimento permitido com rastro distante.
+  check.eq(desloca(Posicao(5, 5), Cima, [Posicao(10, 10)], []), Posicao(4, 5))
+}
+
 /// Devolve o dono da casa na posição pos.
 /// Devolve None se a casa for neutra ou não estiver no mapa.
 pub fn dono_da_casa(mapa: List(Casa), pos: Posicao) -> Option(Int) {
@@ -483,6 +543,14 @@ pub fn dono_da_casa(mapa: List(Casa), pos: Posicao) -> Option(Int) {
     Ok(casa) -> casa.dono
     Error(_) -> None
   }
+}
+
+pub fn dono_da_casa_examples() {
+  let partida = nova_partida()
+
+  check.eq(dono_da_casa(partida.mapa, Posicao(17, 2)), Some(1))
+  check.eq(dono_da_casa(partida.mapa, Posicao(2, 17)), Some(2))
+  check.eq(dono_da_casa(partida.mapa, Posicao(10, 10)), None)
 }
 
 /// Move o jogador na direção escolhida. Se ele estiver esperando 
@@ -500,6 +568,19 @@ pub fn move(partida: Partida, jogador_id: Int, direcao: Direcao) -> Partida {
         Error(_) -> partida
       }
   }
+}
+
+pub fn move_examples() {
+  let partida = nova_partida()
+
+  let movida = move(partida, 1, Cima)
+
+  check.eq(list.map(movida.jogadores, fn(j) { j.posicao }), [
+    Posicao(16, 2),
+    Posicao(2, 17),
+  ])
+
+  check.eq(move(partida, 3, Cima), partida)
 }
 
 /// Atualiza a posição e o rastro do jogador.
@@ -578,91 +659,6 @@ pub fn adicionar_rastro(pos: Posicao, rastro: List(Posicao)) -> List(Posicao) {
     True -> rastro
     False -> [pos, ..rastro]
   }
-}
-
-// ----------------------------------------------------------------------
-// Posições e movimentação - Exemplos
-// ----------------------------------------------------------------------
-
-pub fn dentro_do_mapa_examples() {
-  check.eq(dentro_do_mapa(Posicao(0, 0)), True)
-  check.eq(dentro_do_mapa(Posicao(19, 19)), True)
-  check.eq(dentro_do_mapa(Posicao(-1, 5)), False)
-  check.eq(dentro_do_mapa(Posicao(20, 5)), False)
-}
-
-pub fn desloca_examples() {
-  // Movimentação sem rastro.
-  check.eq(desloca(Posicao(5, 5), Cima, [], []), Posicao(4, 5))
-  check.eq(desloca(Posicao(5, 5), Baixo, [], []), Posicao(6, 5))
-  check.eq(desloca(Posicao(5, 5), Esquerda, [], []), Posicao(5, 4))
-  check.eq(desloca(Posicao(5, 5), Direita, [], []), Posicao(5, 6))
-
-  // Movimentação nas bordas do mapa.
-  check.eq(desloca(Posicao(0, 0), Cima, [], []), Posicao(0, 0))
-  check.eq(desloca(Posicao(0, 0), Esquerda, [], []), Posicao(0, 0))
-  check.eq(desloca(Posicao(19, 19), Baixo, [], []), Posicao(19, 19))
-  check.eq(desloca(Posicao(19, 19), Direita, [], []), Posicao(19, 19))
-
-  // Movimento bloqueado pelo próprio rastro.
-  check.eq(desloca(Posicao(5, 5), Cima, [Posicao(4, 5)], []), Posicao(5, 5))
-  check.eq(desloca(Posicao(5, 5), Baixo, [Posicao(6, 5)], []), Posicao(5, 5))
-  check.eq(desloca(Posicao(5, 5), Esquerda, [Posicao(5, 4)], []), Posicao(5, 5))
-  check.eq(desloca(Posicao(5, 5), Direita, [Posicao(5, 6)], []), Posicao(5, 5))
-
-  // Movimento bloqueado por uma posição no meio do rastro.
-  check.eq(
-    desloca(
-      Posicao(5, 5),
-      Direita,
-      [
-        Posicao(3, 3),
-        Posicao(5, 6),
-        Posicao(8, 8),
-      ],
-      [],
-    ),
-    Posicao(5, 5),
-  )
-
-  // Movimento permitido quando o destino não pertence ao rastro.
-  check.eq(
-    desloca(
-      Posicao(5, 5),
-      Direita,
-      [
-        Posicao(4, 5),
-        Posicao(5, 4),
-        Posicao(6, 5),
-      ],
-      [],
-    ),
-    Posicao(5, 6),
-  )
-
-  // Movimento permitido com rastro distante.
-  check.eq(desloca(Posicao(5, 5), Cima, [Posicao(10, 10)], []), Posicao(4, 5))
-}
-
-pub fn dono_da_casa_examples() {
-  let partida = nova_partida()
-
-  check.eq(dono_da_casa(partida.mapa, Posicao(17, 2)), Some(1))
-  check.eq(dono_da_casa(partida.mapa, Posicao(2, 17)), Some(2))
-  check.eq(dono_da_casa(partida.mapa, Posicao(10, 10)), None)
-}
-
-pub fn move_examples() {
-  let partida = nova_partida()
-
-  let movida = move(partida, 1, Cima)
-
-  check.eq(list.map(movida.jogadores, fn(j) { j.posicao }), [
-    Posicao(16, 2),
-    Posicao(2, 17),
-  ])
-
-  check.eq(move(partida, 3, Cima), partida)
 }
 
 // ----------------------------------------------------------------------
