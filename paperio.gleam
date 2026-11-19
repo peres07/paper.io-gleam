@@ -73,6 +73,9 @@ const largura = 400
 /// Altura da tela, em pixels.
 const altura = 520
 
+/// Velocidade da cobra
+const velocidade_cobra = 1
+
 // ----------------------------------------------------------------------
 // Tipos de dados
 // ----------------------------------------------------------------------
@@ -277,26 +280,34 @@ pub fn base_inicial_examples() {
   check.eq(list.contains(base_inicial(2), Posicao(2, 17)), True)
 }
 
-fn cria_jogador(id: Int) -> Jogador {
+pub fn cria_jogador(id: Int) -> Jogador {
   let base = base_inicial(id)
 
   let posicao = case id {
-    1 -> Posicao(tamanho - 3, 2)
-    _ -> Posicao(2, tamanho - 3)
+    1 -> Posicao(tamanho - 2, 1)
+    _ -> Posicao(1, tamanho - 2)
   }
 
   Jogador(
     id: id,
     posicao: posicao,
-    direcoes: [],
+    direcoes: [direcao_inicial(id)],
     rastro: [],
     casas_proprias: base,
     base: base,
     poderes_guardados: [],
     velocidade_extra: 0,
-    velocidade: 5.0,
+    velocidade: velocidade_cobra,
     reaparecimento: 0,
   )
+}
+
+/// Define a direção inicial baseada no **id** do jogador.
+pub fn direcao_inicial(id: Int) -> Direcao {
+  case id {
+    1 -> Cima
+    _ -> Baixo
+  }
 }
 
 pub fn nova_partida() -> Partida {
@@ -350,6 +361,23 @@ pub fn nova_partida_examples() {
 // Teclas
 // ----------------------------------------------------------------------
 
+/// Troca a direção do jogador correspondente
+fn guardar_direcao(
+  partida: Partida,
+  jogador_id: Int,
+  direcao: Direcao,
+) -> Partida {
+  let jogadores =
+    list.map(partida.jogadores, fn(j) {
+      case j.id == jogador_id && j.reaparecimento == 0 {
+        True -> Jogador(..j, direcoes: [direcao])
+        False -> j
+      }
+    })
+
+  Partida(..partida, jogadores: jogadores)
+}
+
 /// Devolve a direção que corresponde a *tecla* clicada.
 /// Devolve None se *tecla* não é uma seta.
 pub fn direcao(tecla: key.Event) -> Option(Direcao) {
@@ -370,7 +398,8 @@ pub fn processa_tecla(estado: Estado, numero: Int, tecla: key.Event) -> Estado {
       EmPartida(gerador, imagens, nova_partida())
     EmPartida(gerador, imagens, partida), _ ->
       case direcao(tecla) {
-        Some(dir) -> EmPartida(gerador, imagens, move(partida, numero, dir))
+        Some(dir) ->
+          EmPartida(gerador, imagens, guardar_direcao(partida, numero, dir))
         None -> estado
       }
     _, _ -> estado
@@ -405,11 +434,20 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
           }
         })
 
-      EmPartida(
-        gerador,
-        imagens,
-        Partida(..partida, tiques: tiques, jogadores: jogadores),
-      )
+      let atualizada = Partida(..partida, tiques: tiques, jogadores: jogadores)
+
+      let movimentada = case tiques % 4 == 0 {
+        True ->
+          list.fold(jogadores, atualizada, fn(acumulada, jogador) {
+            case jogador.direcoes {
+              [direcao, ..] -> move(acumulada, jogador.id, direcao)
+              [] -> acumulada
+            }
+          })
+        False -> atualizada
+      }
+
+      EmPartida(gerador, imagens, movimentada)
     }
   }
 }
@@ -624,20 +662,11 @@ pub fn move_examples() {
 /// velocidade padrão. Preserva o território conquistado e inicia
 /// a espera de dois segundos para reaparecer.
 pub fn reinicia_jogador(jogador: Jogador) -> Jogador {
-  let base = jogador.base
   let jogador_inicial = cria_jogador(jogador.id)
-  let nova_posicao = jogador_inicial.posicao
 
   Jogador(
-    id: jogador.id,
-    posicao: nova_posicao,
-    direcoes: [],
-    rastro: [],
+    ..jogador_inicial,
     casas_proprias: jogador.casas_proprias,
-    base: base,
-    poderes_guardados: [],
-    velocidade_extra: 0,
-    velocidade: 5.0,
     reaparecimento: 2 * tiques_por_segundo,
   )
 }
@@ -665,7 +694,7 @@ pub fn reinicia_jogador_examples() {
   check.eq(reiniciado.rastro, [])
   check.eq(reiniciado.poderes_guardados, [])
   check.eq(reiniciado.velocidade_extra, 0)
-  check.eq(reiniciado.velocidade, 5.0)
+  check.eq(reiniciado.velocidade, velocidade_cobra)
   check.eq(reiniciado.reaparecimento, 2 * tiques_por_segundo)
 
   let jogador_2 = cria_jogador(2)
