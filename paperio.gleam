@@ -254,14 +254,14 @@ pub fn cria_mapa() -> List(Casa) {
 
 pub fn base_inicial(id: Int) -> List(Posicao) {
   let colunas = case id {
-    1 -> sequencia(1, 3)
-    2 -> sequencia(tamanho - 4, tamanho - 2)
+    1 -> sequencia(0, 2)
+    2 -> sequencia(tamanho - 3, tamanho - 1)
     _ -> []
   }
 
   let linhas = case id {
-    1 -> sequencia(tamanho - 4, tamanho - 2)
-    2 -> sequencia(1, 3)
+    1 -> sequencia(tamanho - 3, tamanho - 1)
+    2 -> sequencia(0, 2)
     _ -> []
   }
 
@@ -591,7 +591,7 @@ pub fn dono_da_casa_examples() {
   check.eq(dono_da_casa(partida.mapa, Posicao(10, 10)), None)
 }
 
-/// Move o jogador na direção escolhida. Se ele estiver esperando 
+/// Move o jogador na direção escolhida. Se ele estiver esperando
 /// para reaparecer, mantém a partida sem alterações.
 pub fn move(partida: Partida, jogador_id: Int, direcao: Direcao) -> Partida {
   case
@@ -729,13 +729,13 @@ pub fn mover_jogador(
   }
 }
 
-/// Fecha o rastro do jogador, ao voltar ao uma casa sua
+/// Conquista o rastro e as casas cercadas ao voltar
+/// ao território do jogador.
 pub fn fechar_rastro(partida: Partida, jogador: Jogador) -> List(Casa) {
-  let exteriores = casas_exteriores(partida, jogador)
+  let mascara = criar_mascara(partida, jogador)
+  let mascara = casas_exteriores(mascara)
 
-  list.map(partida.mapa, fn(casa) {
-    conquistar_casa(partida, jogador, exteriores, casa)
-  })
+  pintar_mapa(partida.mapa, mascara, jogador.id)
 }
 
 /// Mantém o rastro dentro do próprio território ou
@@ -773,8 +773,14 @@ pub fn adicionar_rastro(pos: Posicao, rastro: List(Posicao)) -> List(Posicao) {
 // Flood Fill
 // ----------------------------------------------------------------------
 
-/// Devolve as posições acima, abaixo, à esquerda e à
-/// direita de pos, descartando as que ficam fora do mapa.
+/// Estado de uma casa na máscara 
+pub type EstadoCasa {
+  NaoExplorada
+  TerritorioOuRastro
+  Exterior
+}
+
+/// Devolve as posições vizinhas que ficam dentro do mapa.
 pub fn casas_vizinhas(pos: Posicao) -> List(Posicao) {
   let candidatas = [
     Posicao(pos.lin - 1, pos.col),
@@ -786,62 +792,228 @@ pub fn casas_vizinhas(pos: Posicao) -> List(Posicao) {
   list.filter(candidatas, dentro_do_mapa)
 }
 
-pub fn flood_fill(
-  partida: Partida,
-  jogador: Jogador,
-  pendentes: List(Posicao),
-  visitadas: List(Posicao),
-) -> List(Posicao) {
-  case pendentes {
-    [] -> visitadas
-    [pos, ..resto] -> {
-      let exterior =
-        list.filter(casas_vizinhas(pos), fn(vizinha) {
-          dono_da_casa(partida.mapa, vizinha) != Some(jogador.id)
-          && !contem_posicao(vizinha, jogador.rastro)
-          && !contem_posicao(vizinha, visitadas)
-        })
-      let novas_pendentes =
-        list.fold(exterior, resto, fn(lista, pos) { [pos, ..lista] })
+/// Cria a máscara na mesma ordem das casas do mapa.
+/// O território e o rastro do jogador formam a barreira.
+/// As outras casas começam como não exploradas.
+pub fn criar_mascara(partida: Partida, jogador: Jogador) -> List(EstadoCasa) {
+  list.map(partida.mapa, fn(casa) {
+    case
+      casa.dono == Some(jogador.id)
+      || contem_posicao(casa.posicao, jogador.rastro)
+    {
+      True -> TerritorioOuRastro
+      False -> NaoExplorada
+    }
+  })
+}
 
-      let novas_visitadas =
-        list.fold(exterior, visitadas, fn(lista, pos) { [pos, ..lista] })
+/// Retorna True se a posição não pode ser explorada,
+/// ou seja, se está fora do mapa, é território ou 
+/// rastro, ou se já foi explorada
+pub fn marcada(mascara: List(EstadoCasa), pos: Posicao) -> Bool {
+  case dentro_do_mapa(pos) {
+    False -> True
+    True -> {
+      let estado_casa =
+        consultar_indice(
+          mascara,
+          pos.lin * tamanho + pos.col,
+          TerritorioOuRastro,
+        )
 
-      flood_fill(partida, jogador, novas_pendentes, novas_visitadas)
+      estado_casa != NaoExplorada
     }
   }
 }
 
-/// Devolve as posições alcançavéis pelas bordas sem
-/// atravesar o território nem a borda do jogador
-pub fn casas_exteriores(partida: Partida, jogador: Jogador) -> List(Posicao) {
-  let bordas =
-    list.filter(todas_as_casas(), fn(pos) {
-      let borda =
-        pos.lin == 0
-        || pos.lin == tamanho - 1
-        || pos.col == 0
-        || pos.col == tamanho - 1
-
-      borda
-      && dono_da_casa(partida.mapa, pos) != Some(jogador.id)
-      && !contem_posicao(pos, jogador.rastro)
-    })
-
-  flood_fill(partida, jogador, bordas, bordas)
+/// Devolve o elemento no índice *indice*. Caso
+/// o índice não existir, devolve *default*
+pub fn consultar_indice(lista: List(a), indice: Int, default: a) -> a {
+  case lista, indice {
+    [primeiro, ..], 0 -> primeiro
+    [_, ..resto], n if n > 0 -> consultar_indice(resto, n - 1, default)
+    _, _ -> default
+  }
 }
 
-pub fn conquistar_casa(
-  partida: Partida,
-  jogador: Jogador,
-  exteriores: List(Posicao),
-  casa: Casa,
-) -> Casa {
-  let conquistar = !contem_posicao(casa.posicao, exteriores)
+/// Devolve as posições não exploradas nas quatro bordas.
+pub fn bordas_livres(mascara: List(EstadoCasa)) -> List(Posicao) {
+  list.filter(todas_as_casas(), fn(pos) {
+    let borda =
+      pos.lin == 0
+      || pos.lin == tamanho - 1
+      || pos.col == 0
+      || pos.col == tamanho - 1
 
-  case conquistar {
-    True -> Casa(..casa, dono: Some(jogador.id))
-    False -> casa
+    borda && !marcada(mascara, pos)
+  })
+}
+
+/// Define o tipo trecho que contém a linha que estamos
+/// analisando, o inicio do trecho e o fim dele
+pub type Trecho {
+  Trecho(linha: Int, inicio: Int, fim: Int)
+}
+
+/// Encontra o limite do trecho não explorado na direção indicada.
+/// A posição inicial deve ser não explorada.
+pub fn limite_trecho(
+  mascara: List(EstadoCasa),
+  pos: Posicao,
+  direcao: Direcao,
+) -> Int {
+  let proxima = case direcao {
+    Direita -> Posicao(pos.lin, pos.col + 1)
+    Esquerda -> Posicao(pos.lin, pos.col - 1)
+    _ -> pos
+  }
+
+  case proxima == pos || marcada(mascara, proxima) {
+    True -> pos.col
+    False -> limite_trecho(mascara, proxima, direcao)
+  }
+}
+
+/// Encontra o trecho não explorado que contém pos
+pub fn encontrar_trecho(mascara: List(EstadoCasa), pos: Posicao) -> Trecho {
+  Trecho(
+    linha: pos.lin,
+    inicio: limite_trecho(mascara, pos, Esquerda),
+    fim: limite_trecho(mascara, pos, Direita),
+  )
+}
+
+/// Marca todas as casas do trecho como exteriores.
+pub fn marcar_trecho(
+  mascara: List(EstadoCasa),
+  trecho: Trecho,
+) -> List(EstadoCasa) {
+  let inicio = trecho.linha * tamanho + trecho.inicio
+  let fim = trecho.linha * tamanho + trecho.fim
+
+  marcar_intervalo(mascara, 0, inicio, fim)
+}
+
+/// Percorre a máscara a partir de indice, colocando True
+/// entre inicio e fim.
+pub fn marcar_intervalo(
+  mascara: List(EstadoCasa),
+  indice: Int,
+  inicio: Int,
+  fim: Int,
+) -> List(EstadoCasa) {
+  case indice > fim {
+    True -> mascara
+    False -> {
+      case mascara {
+        [] -> []
+        [primeiro, ..resto] -> {
+          let novo_valor = case indice >= inicio {
+            True -> Exterior
+            False -> primeiro
+          }
+          [novo_valor, ..marcar_intervalo(resto, indice + 1, inicio, fim)]
+        }
+      }
+    }
+  }
+}
+
+/// Devolve uma posição por grupo não explorado na linha
+/// *linha*, entre as colunas inicial e final do trecho.
+pub fn conexoes_linha(
+  mascara: List(EstadoCasa),
+  trecho: Trecho,
+  linha: Int,
+) -> List(Posicao) {
+  procurar_conexoes(mascara, linha, trecho.inicio, trecho.fim, True, [])
+}
+
+/// Percorre a linha da coluna atual até fim, guardando em
+/// pendentes a primeira posição de cada grupo não explorado.
+fn procurar_conexoes(
+  mascara: List(EstadoCasa),
+  linha: Int,
+  coluna: Int,
+  fim: Int,
+  marcar_inicio: Bool,
+  pendentes: List(Posicao),
+) -> List(Posicao) {
+  case coluna > fim {
+    True -> pendentes
+
+    False -> {
+      let pos = Posicao(linha, coluna)
+      let bloqueada = marcada(mascara, pos)
+
+      let pendentes = case marcar_inicio && !bloqueada {
+        True -> [pos, ..pendentes]
+        False -> pendentes
+      }
+
+      procurar_conexoes(mascara, linha, coluna + 1, fim, bloqueada, pendentes)
+    }
+  }
+}
+
+/// Explora as posições pendentes, preenchendo um trecho
+/// por vez como Exterior. Para cada trecho, procura passagens 
+/// acima e abaixo e as adiciona às pendentes.
+pub fn scanline_fill(
+  mascara: List(EstadoCasa),
+  pendentes: List(Posicao),
+) -> List(EstadoCasa) {
+  case pendentes {
+    [] -> mascara
+
+    [pos, ..resto] -> {
+      case marcada(mascara, pos) {
+        True -> scanline_fill(mascara, resto)
+
+        False -> {
+          let trecho = encontrar_trecho(mascara, pos)
+          let mascara = marcar_trecho(mascara, trecho)
+
+          let acima = conexoes_linha(mascara, trecho, trecho.linha - 1)
+          let abaixo = conexoes_linha(mascara, trecho, trecho.linha + 1)
+
+          let pendentes =
+            list.fold(acima, resto, fn(lista, pos) { [pos, ..lista] })
+
+          let pendentes =
+            list.fold(abaixo, pendentes, fn(lista, pos) { [pos, ..lista] })
+
+          scanline_fill(mascara, pendentes)
+        }
+      }
+    }
+  }
+}
+
+/// Marca as casas alcançáveis pelas quatro bordas,
+/// sem atravessar o território nem o rastro do jogador.
+pub fn casas_exteriores(mascara: List(EstadoCasa)) -> List(EstadoCasa) {
+  let bordas = bordas_livres(mascara)
+  scanline_fill(mascara, bordas)
+}
+
+/// Não muda o dono das casas exteriores e conquista o resto.
+/// Após o fill, NaoExplorada representa uma casa cercada.
+pub fn pintar_mapa(
+  casas: List(Casa),
+  mascara: List(EstadoCasa),
+  jogador_id: Int,
+) -> List(Casa) {
+  case casas, mascara {
+    [], _ -> []
+    [casa, ..resto_casas], [estado, ..resto_mascara] -> {
+      let nova_casa = case estado {
+        Exterior -> casa
+        _ -> Casa(..casa, dono: Some(jogador_id))
+      }
+      [nova_casa, ..pintar_mapa(resto_casas, resto_mascara, jogador_id)]
+    }
+    _, _ -> casas
   }
 }
 
@@ -860,6 +1032,234 @@ pub fn vizinhas_examples() {
     Posicao(6, 5),
     Posicao(5, 4),
     Posicao(5, 6),
+  ])
+}
+
+pub fn criar_mascara_examples() {
+  let jogador = Jogador(..cria_jogador(1), rastro: [Posicao(0, 1)])
+
+  let partida =
+    Partida(..nova_partida(), mapa: [
+      Casa(Posicao(0, 0), Some(1)),
+      Casa(Posicao(0, 1), None),
+      Casa(Posicao(0, 2), Some(2)),
+    ])
+
+  check.eq(criar_mascara(partida, jogador), [
+    TerritorioOuRastro,
+    TerritorioOuRastro,
+    NaoExplorada,
+  ])
+}
+
+pub fn consultar_indice_examples() {
+  check.eq(consultar_indice([10, 20, 30], 1, 0), 20)
+  check.eq(consultar_indice([10], 3, 0), 0)
+  check.eq(consultar_indice([], 0, 0), 0)
+}
+
+pub fn marcada_examples() {
+  let mascara = [
+    NaoExplorada,
+    TerritorioOuRastro,
+    Exterior,
+  ]
+
+  check.eq(marcada(mascara, Posicao(0, 0)), False)
+  check.eq(marcada(mascara, Posicao(0, 1)), True)
+  check.eq(marcada(mascara, Posicao(0, 2)), True)
+  check.eq(marcada(mascara, Posicao(-1, 0)), True)
+}
+
+pub fn bordas_livres_examples() {
+  check.eq(
+    bordas_livres([
+      NaoExplorada,
+      TerritorioOuRastro,
+      NaoExplorada,
+    ]),
+    [Posicao(0, 0), Posicao(0, 2)],
+  )
+
+  check.eq(bordas_livres([TerritorioOuRastro]), [])
+}
+
+pub fn limite_trecho_examples() {
+  let mascara = [
+    TerritorioOuRastro,
+    NaoExplorada,
+    NaoExplorada,
+    NaoExplorada,
+    TerritorioOuRastro,
+  ]
+
+  check.eq(limite_trecho(mascara, Posicao(0, 2), Esquerda), 1)
+  check.eq(limite_trecho(mascara, Posicao(0, 2), Direita), 3)
+
+  // Para na borda esquerda
+  check.eq(limite_trecho([NaoExplorada], Posicao(0, 0), Esquerda), 0)
+}
+
+pub fn encontrar_trecho_examples() {
+  let mascara = [
+    TerritorioOuRastro,
+    NaoExplorada,
+    NaoExplorada,
+    TerritorioOuRastro,
+  ]
+
+  check.eq(
+    encontrar_trecho(mascara, Posicao(0, 1)),
+    Trecho(linha: 0, inicio: 1, fim: 2),
+  )
+}
+
+pub fn marcar_trecho_examples() {
+  check.eq(
+    marcar_trecho(
+      [NaoExplorada, NaoExplorada, NaoExplorada],
+      Trecho(linha: 0, inicio: 1, fim: 2),
+    ),
+    [NaoExplorada, Exterior, Exterior],
+  )
+}
+
+pub fn marcar_intervalo_examples() {
+  check.eq(
+    marcar_intervalo(
+      [
+        TerritorioOuRastro,
+        NaoExplorada,
+        NaoExplorada,
+        NaoExplorada,
+      ],
+      0,
+      1,
+      2,
+    ),
+    [
+      TerritorioOuRastro,
+      Exterior,
+      Exterior,
+      NaoExplorada,
+    ],
+  )
+
+  check.eq(marcar_intervalo([], 0, 0, 1), [])
+}
+
+pub fn conexoes_linha_examples() {
+  let mascara = [
+    NaoExplorada,
+    NaoExplorada,
+    TerritorioOuRastro,
+    NaoExplorada,
+  ]
+
+  let trecho = Trecho(linha: 1, inicio: 0, fim: 3)
+
+  // Uma posição por grupo, acumuladas pelo começo da lista.
+  check.eq(conexoes_linha(mascara, trecho, 0), [
+    Posicao(0, 3),
+    Posicao(0, 0),
+  ])
+
+  check.eq(conexoes_linha(mascara, trecho, -1), [])
+}
+
+pub fn procurar_conexoes_examples() {
+  check.eq(procurar_conexoes([NaoExplorada, NaoExplorada], 0, 0, 1, True, []), [
+    Posicao(0, 0),
+  ])
+
+  // Já estamos dentro de um grupo registrado.
+  check.eq(
+    procurar_conexoes([NaoExplorada, NaoExplorada], 0, 0, 1, False, []),
+    [],
+  )
+}
+
+pub fn scanline_fill_examples() {
+  let mascara = [
+    NaoExplorada,
+    NaoExplorada,
+    TerritorioOuRastro,
+    NaoExplorada,
+  ]
+
+  // A barreira impede chegar ao segundo grupo.
+  check.eq(scanline_fill(mascara, [Posicao(0, 0)]), [
+    Exterior,
+    Exterior,
+    TerritorioOuRastro,
+    NaoExplorada,
+  ])
+
+  check.eq(scanline_fill(mascara, []), mascara)
+
+  // Uma posição repetida não altera o resultado.
+  check.eq(
+    scanline_fill([NaoExplorada], [
+      Posicao(0, 0),
+      Posicao(0, 0),
+    ]),
+    [Exterior],
+  )
+}
+
+pub fn casas_exteriores_examples() {
+  // Os dois grupos estão na borda e devem ser explorados.
+  check.eq(
+    casas_exteriores([
+      NaoExplorada,
+      TerritorioOuRastro,
+      NaoExplorada,
+    ]),
+    [
+      Exterior,
+      TerritorioOuRastro,
+      Exterior,
+    ],
+  )
+}
+
+pub fn pintar_mapa_examples() {
+  let casas = [
+    Casa(Posicao(0, 0), Some(2)),
+    Casa(Posicao(0, 1), None),
+    Casa(Posicao(0, 2), Some(2)),
+  ]
+
+  let mascara = [
+    Exterior,
+    TerritorioOuRastro,
+    NaoExplorada,
+  ]
+
+  check.eq(pintar_mapa(casas, mascara, 1), [
+    // Exterior mantém o dono.
+    Casa(Posicao(0, 0), Some(2)),
+    // Rastro fica com o jogador.
+    Casa(Posicao(0, 1), Some(1)),
+    // Casa cercada é conquistada.
+    Casa(Posicao(0, 2), Some(1)),
+  ])
+}
+
+pub fn fechar_rastro_examples() {
+  let jogador = Jogador(..cria_jogador(1), rastro: [Posicao(0, 1)])
+
+  let partida =
+    Partida(..nova_partida(), mapa: [
+      Casa(Posicao(0, 0), Some(1)),
+      Casa(Posicao(0, 1), None),
+      Casa(Posicao(0, 2), None),
+    ])
+
+  check.eq(fechar_rastro(partida, jogador), [
+    Casa(Posicao(0, 0), Some(1)),
+    Casa(Posicao(0, 1), Some(1)),
+    Casa(Posicao(0, 2), None),
   ])
 }
 
