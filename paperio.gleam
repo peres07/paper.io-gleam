@@ -491,12 +491,11 @@ pub fn desloca(
 
   case
     dentro_do_mapa(destino),
-    contem_posicao(destino, rastro),
     contem_posicao(destino, base_adversario),
     destino == adversario_pos
   {
-    True, False, False, False -> destino
-    _, _, _, _ -> pos
+    True, False, False -> destino
+    _, _, _ -> pos
   }
 }
 
@@ -594,17 +593,16 @@ pub fn dono_da_casa_examples() {
 /// Move o jogador na direção escolhida. Se ele estiver esperando
 /// para reaparecer, mantém a partida sem alterações.
 pub fn move(partida: Partida, jogador_id: Int, direcao: Direcao) -> Partida {
-  case
+  let jogador =
     list.find(partida.jogadores, fn(j) {
       j.id == jogador_id && j.reaparecimento == 0
     })
-  {
-    Error(_) -> partida
-    Ok(jogador) ->
-      case list.find(partida.jogadores, fn(j) { j.id != jogador.id }) {
-        Ok(adversario) -> mover_jogador(partida, jogador, direcao, adversario)
-        Error(_) -> partida
-      }
+  let adversario = list.find(partida.jogadores, fn(j) { j.id != jogador_id })
+
+  case jogador, adversario {
+    Ok(jogador), Ok(adversario) ->
+      mover_jogador(partida, jogador, direcao, adversario)
+    _, _ -> partida
   }
 }
 
@@ -695,35 +693,42 @@ pub fn mover_jogador(
       adversario.posicao,
     )
 
-  let cortou_rastro =
-    nova_pos != jogador.posicao && contem_posicao(nova_pos, adversario.rastro)
+  let moveu = nova_pos != jogador.posicao
+  let cortou_rastro = moveu && contem_posicao(nova_pos, jogador.rastro)
+  let cortou_rastro_adversario =
+    moveu && contem_posicao(nova_pos, adversario.rastro)
+  let voltou_area = dono_da_casa(partida.mapa, nova_pos) == Some(jogador.id)
+  let fechou_rastro = moveu && voltou_area && jogador.rastro != []
 
-  let voltou = dono_da_casa(partida.mapa, nova_pos) == Some(jogador.id)
-
-  let fecha = nova_pos != jogador.posicao && voltou && jogador.rastro != []
-
-  let mapa = case fecha {
+  let mapa = case fechou_rastro {
     True -> fechar_rastro(partida, jogador)
     False -> partida.mapa
   }
-
-  let rastro = case fecha {
+  let rastro = case fechou_rastro {
     True -> []
     False -> atualizar_rastro(partida, jogador, nova_pos)
   }
 
+  let novo_jogador = case cortou_rastro {
+    True -> reinicia_jogador(jogador)
+    False -> Jogador(..jogador, posicao: nova_pos, rastro: rastro)
+  }
+  let novo_adversario = case cortou_rastro_adversario {
+    True -> reinicia_jogador(adversario)
+    False -> adversario
+  }
+
   let jogadores =
     list.map(partida.jogadores, fn(j) {
-      case j.id == jogador.id, j.id == adversario.id && cortou_rastro {
-        True, _ -> Jogador(..j, posicao: nova_pos, rastro: rastro)
-        False, True -> reinicia_jogador(j)
-        False, False -> j
+      case j.id == jogador.id {
+        True -> novo_jogador
+        False -> novo_adversario
       }
     })
 
   let atualizada = Partida(..partida, mapa: mapa, jogadores: jogadores)
 
-  case fecha {
+  case fechou_rastro {
     True -> atualizar_placares(atualizada)
     False -> atualizada
   }
