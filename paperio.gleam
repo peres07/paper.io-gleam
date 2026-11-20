@@ -77,6 +77,15 @@ const altura = 520
 /// Velocidade da cobra
 const velocidade_cobra = 1.0
 
+/// Velocidade extra da cobra
+const velocidade_boost = 3.0
+
+/// Tempo de velocidade extra
+const boost_tempo = 40
+
+/// Delay poder - 80 ticks
+const delay_poder = 80
+
 // ----------------------------------------------------------------------
 // Tipos de dados
 // ----------------------------------------------------------------------
@@ -334,7 +343,7 @@ pub fn nova_partida() -> Partida {
     jogadores: [cria_jogador(1), cria_jogador(2)],
     poderes: [],
     tiques: 0,
-    proximo_poder: 80,
+    proximo_poder: delay_poder,
     placares: [],
   )
   |> atualizar_placares
@@ -397,6 +406,19 @@ pub fn processa_tecla(estado: Estado, numero: Int, tecla: key.Event) -> Estado {
       EmPartida(gerador, imagens, nova_partida())
     Resultado(gerador, imagens, jogadores), key.Enter ->
       EmPartida(gerador, imagens, nova_partida())
+    EmPartida(gerador, imagens, partida), key.Char("1") -> {
+      case tem_poder(partida, numero, Expansao) {
+        True ->
+          EmPartida(gerador, imagens, ativar_poder(partida, numero, Expansao))
+        False -> estado
+      }
+    }
+    EmPartida(gerador, imagens, partida), key.Char("2") ->
+      case tem_poder(partida, numero, Velocidade) {
+        True ->
+          EmPartida(gerador, imagens, ativar_poder(partida, numero, Velocidade))
+        False -> estado
+      }
     EmPartida(gerador, imagens, partida), _ ->
       case direcao(tecla) {
         Some(dir) ->
@@ -419,14 +441,62 @@ pub fn tique(estado: Estado) -> Estado {
   }
 }
 
+/// Retorna True caso algum jogador *j* esteja na
+/// posição *pos*
+pub fn ocupada(jogadores: List(Jogador), pos: Posicao) -> Bool {
+  list.any(jogadores, fn(j) { j.posicao == pos })
+}
+
+/// Produz a lista de posições do mapa da *partida* que não tem
+/// nem jogador, nem poder
+pub fn casas_livres(partida: Partida) -> List(Posicao) {
+  let posicoes_poderes = list.map(partida.poderes, fn(poder) {
+    poder.posicao
+  })
+
+  list.filter(todas_as_casas(), fn(casa) {
+    !list.contains(posicoes_poderes, casa) && !ocupada(partida.jogadores, casa)
+  })
+}
+
+pub fn sorteia_tipo(
+  gerador: Generator,
+) -> #(TipoPoder, Generator) {
+  let tipos = [Velocidade, Expansao]
+
+  case random.pick(gerador, tipos) {
+    #(Ok(tipo), novo_gerador) -> #(tipo, novo_gerador)
+    #(Error(_), novo_gerador) -> #(Velocidade, novo_gerador)
+  }
+}
+
+/// Adiciona os poderes na *partida*. Se não há casa livre, os poderes
+/// não mudam. Devolve os poderes e o novo gerador.
+pub fn sorteia_poder(
+  gerador: Generator,
+  partida: Partida,
+) -> #(List(PoderNoMapa), Generator) {
+  case random.pick(gerador, casas_livres(partida)) {
+    #(Ok(casa), gerador) -> {
+      let #(tipo, gerador) = sorteia_tipo(gerador)
+      let poder = PoderNoMapa(tipo, casa)
+
+      #([poder, ..partida.poderes], gerador)
+    }
+
+    #(Error(_), gerador) ->
+      #(partida.poderes, gerador)
+  }
+}
+
 /// Avança um tique da partida e mostra o resultado
 /// quando a duração é atingida.
 pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
   let tiques = partida.tiques + 1
 
-  case tiques >= duracao, partida.proximo_poder <= 1 {
-    True, _ -> Resultado(gerador, imagens, partida.placares)
-    False, _ -> {
+  case tiques >= duracao {
+    True -> Resultado(gerador, imagens, partida.placares)
+    False -> {
       let jogadores =
         list.map(partida.jogadores, fn(j) {
           case j.reaparecimento > 0 {
@@ -437,19 +507,73 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
 
       let atualizada = Partida(..partida, tiques: tiques, jogadores: jogadores)
       let intervalo_movimento = int.max(1, float.round(6.0 /. velocidade_cobra))
+      let intervalo_movimento_boost = int.max(1, float.round(6.0 /. velocidade_boost))
 
-      let movimentada = case tiques % intervalo == 0 {
-        True ->
-          list.fold(jogadores, atualizada, fn(acumulada, jogador) {
-            case jogador.direcoes {
-              [direcao, ..] -> move(acumulada, jogador.id, direcao)
-              [] -> acumulada
+      let movimentada =
+        list.fold(jogadores, atualizada, fn(acumulado, jogador) {
+          let intervalo = case jogador.velocidade_extra > 0 {
+            True -> intervalo_movimento_boost
+            False -> intervalo_movimento
+          }
+
+          case tiques % intervalo == 0 {
+            True ->
+              case jogador.direcoes {
+                [direcao, ..] -> move(acumulado, jogador.id, direcao)
+                [] -> acumulado
+              }
+            False -> acumulado
+          }
+        })
+
+        let jogadores =
+          list.map(movimentada.jogadores, fn(j) {
+            case j.velocidade_extra > 0 {
+              True -> {
+                let restante = j.velocidade_extra - 1
+
+                case restante == 0 {
+                  True ->
+                    Jogador(
+                      ..j,
+                      velocidade_extra: 0,
+                      velocidade: velocidade_cobra,
+                    )
+
+                  False ->
+                    Jogador(..j, velocidade_extra: restante)
+                }
+              }
+
+              False -> j
             }
           })
-        False -> atualizada
-      }
 
-      EmPartida(gerador, imagens, movimentada)
+        let movimentada = Partida(..movimentada, jogadores: jogadores)
+
+
+      case movimentada.proximo_poder <= 1 {
+        True -> {
+          let #(poderes, novo_gerador) = sorteia_poder(gerador, movimentada)
+
+          let atualizada = Partida(
+            ..movimentada,
+            poderes: poderes,
+            proximo_poder: delay_poder,
+          )
+
+          EmPartida(novo_gerador, imagens, atualizada)
+        }
+
+        False -> {
+          let atualizada = Partida(
+            ..movimentada,
+            proximo_poder: movimentada.proximo_poder - 1,
+          )
+
+          EmPartida(gerador, imagens, atualizada)
+        }
+      }
     }
   }
 }
@@ -731,6 +855,33 @@ pub fn mover_jogador(
   let voltou_area = dono_da_casa(partida.mapa, nova_pos) == Some(jogador.id)
   let fechou_rastro = moveu && voltou_area && jogador.rastro != []
 
+  let poder = case moveu {
+    True -> list.find(partida.poderes, fn(p) {
+      p.posicao == nova_pos
+    })
+    False -> Error(Nil)
+  }
+
+  let jogador_atualizado1 =
+    case poder {
+      Ok(p) -> {
+        Jogador(
+          ..jogador,
+          poderes_guardados: [p.tipo, ..jogador.poderes_guardados],
+        )
+      }
+      Error(_) -> jogador
+    }
+
+  let poderes = case poder {
+    Ok(p) ->
+      list.filter(partida.poderes, fn(outro) {
+        outro.posicao != p.posicao
+      })
+
+    Error(_) -> partida.poderes
+  }
+
   let mapa = case fechou_rastro {
     True -> fechar_rastro(partida, jogador)
     False -> partida.mapa
@@ -740,9 +891,9 @@ pub fn mover_jogador(
     False -> atualizar_rastro(partida, jogador, nova_pos)
   }
 
-  let novo_jogador = case cortou_rastro {
-    True -> reinicia_jogador(jogador)
-    False -> Jogador(..jogador, posicao: nova_pos, rastro: rastro)
+  let jogador_atualizado2 = case cortou_rastro {
+    True -> reinicia_jogador(jogador_atualizado1)
+    False -> Jogador(..jogador_atualizado1, posicao: nova_pos, rastro: rastro)
   }
   let novo_adversario = case cortou_rastro_adversario {
     True -> reinicia_jogador(adversario)
@@ -752,12 +903,17 @@ pub fn mover_jogador(
   let jogadores =
     list.map(partida.jogadores, fn(j) {
       case j.id == jogador.id {
-        True -> novo_jogador
+        True -> jogador_atualizado2
         False -> novo_adversario
       }
     })
 
-  let atualizada = Partida(..partida, mapa: mapa, jogadores: jogadores)
+    let atualizada = Partida(
+      ..partida,
+      mapa: mapa,
+      jogadores: jogadores,
+      poderes: poderes,
+    )
 
   case fechou_rastro {
     True -> atualizar_placares(atualizada)
@@ -1300,6 +1456,99 @@ pub fn fechar_rastro_examples() {
 }
 
 // ----------------------------------------------------------------------
+// Poderes
+// ----------------------------------------------------------------------
+pub fn remover_poder(poderes: List(TipoPoder), tipo: TipoPoder) -> List(TipoPoder) {
+  case poderes {
+    [] -> []
+    [primeiro, ..resto] if primeiro == tipo -> resto
+    [primeiro, ..resto] -> [primeiro, ..remover_poder(resto, tipo)]
+  }
+}
+
+pub fn tem_poder(partida: Partida, jogador_id: Int, tipo: TipoPoder) -> Bool {
+  let jogador = list.find(partida.jogadores, fn(j) {
+    j.id == jogador_id
+  })
+
+  case jogador {
+    Ok(j) -> list.contains(j.poderes_guardados, tipo)
+    Error(_) -> False
+  }
+}
+
+pub fn aumentar_velocidade(j: Jogador) -> Jogador {
+  Jogador(
+    ..j,
+    velocidade: velocidade_boost,
+    velocidade_extra: boost_tempo,
+  )
+}
+
+pub fn ativar_expansao(j: Jogador, partida: Partida) -> Partida {
+  let mapa = list.map(partida.mapa, fn(casa) {
+    let perto =
+      casa.posicao.lin >= j.posicao.lin - 1 &&
+      casa.posicao.lin <= j.posicao.lin + 1 &&
+      casa.posicao.col >= j.posicao.col - 1 &&
+      casa.posicao.col <= j.posicao.col + 1
+
+    let base_adversaria = list.any(partida.jogadores, fn(outro) {
+      outro.id != j.id && contem_posicao(casa.posicao, outro.base)
+    })
+
+    case perto && !base_adversaria {
+      True -> Casa(..casa, dono: Some(j.id))
+      False -> casa
+    }
+  })
+
+  atualizar_placares(Partida(..partida, mapa: mapa))
+}
+
+pub fn ativar_poder(
+  partida: Partida,
+  jogador_id: Int,
+  tipo: TipoPoder,
+) -> Partida {
+  let atualizada = case tipo {
+    Velocidade -> {
+      let jogadores = list.map(partida.jogadores, fn(j) {
+        case j.id == jogador_id {
+          True -> aumentar_velocidade(j)
+          False -> j
+        }
+      })
+
+      Partida(..partida, jogadores: jogadores)
+    }
+
+    Expansao -> {
+      let jogador = list.find(partida.jogadores, fn(j) {
+        j.id == jogador_id
+      })
+
+      case jogador {
+        Ok(j) -> ativar_expansao(j, partida)
+        Error(_) -> partida
+      }
+    }
+  }
+
+  let jogadores = list.map(atualizada.jogadores, fn(j) {
+    case j.id == jogador_id {
+      True -> Jogador(
+        ..j,
+        poderes_guardados: remover_poder(j.poderes_guardados, tipo),
+      )
+      False -> j
+    }
+  })
+
+  Partida(..atualizada, jogadores: jogadores)
+}
+
+// ----------------------------------------------------------------------
 // Desenho
 // ----------------------------------------------------------------------
 
@@ -1364,6 +1613,13 @@ fn desenha_rastro(id: Int) -> Image {
   image.square(lado_casa, style.fill(cor_rastro(Some(id))))
 }
 
+fn desenha_poder(imagens: ImagensPoderes, tipo: TipoPoder) -> Image {
+  case tipo {
+    Expansao -> imagens.expansao
+    Velocidade -> imagens.velocidade
+  }
+}
+
 /// Coloca uma imagem no centro de uma posição do mapa.
 fn coloca_img(img: Image, pos: Posicao, elemento: Image) -> Image {
   image.place_image(
@@ -1386,7 +1642,7 @@ fn desenha_jogador(j: Jogador) -> Image {
 }
 
 /// Produz a imagem do mapa com suas casas e jogadores.
-pub fn grade(partida: Partida) -> Image {
+pub fn grade(partida: Partida, imagens_poderes: ImagensPoderes) -> Image {
   let fundo =
     image.rectangle(
       tamanho * lado_casa,
@@ -1406,7 +1662,12 @@ pub fn grade(partida: Partida) -> Image {
       })
     })
 
-  list.fold(partida.jogadores, com_rastro, fn(cena, j) {
+  let com_poder =
+      list.fold(partida.poderes, com_rastro, fn(imagem, poder) {
+        coloca_img(imagem, poder.posicao, desenha_poder(imagens_poderes, poder.tipo))
+    })
+
+  list.fold(partida.jogadores, com_poder, fn(cena, j) {
     case j.reaparecimento == 0 {
       True -> coloca_img(cena, j.posicao, desenha_jogador(j))
       False -> cena
@@ -1435,12 +1696,46 @@ pub fn tela_abertura(id: Int) -> Image {
 
 /// Mostra o tempo, os placares e o tabuleiro.
 pub fn tela_partida(
-  _imagens: ImagensPoderes,
+  imagens_poderes: ImagensPoderes,
   partida: Partida,
   id: Int,
 ) -> Image {
   let segundos =
     { duracao - partida.tiques + tiques_por_segundo - 1 } / tiques_por_segundo
+
+    let poderes =
+    case list.find(partida.jogadores, fn(j) { j.id == id }) {
+      Ok(j) -> {
+        case j.poderes_guardados {
+          [] -> image.empty
+
+          _ -> {
+            let quantidade = list.length(j.poderes_guardados)
+
+            let texto = image.text(
+              "Poderes (" <> int.to_string(quantidade) <> "): ",
+              18,
+              fill.black,
+            )
+
+            let icones =
+              list.fold(j.poderes_guardados, image.empty, fn(imagem, tipo) {
+                image.beside(imagem, desenha_poder(imagens_poderes, tipo))
+              })
+
+            image.beside(texto, icones)
+          }
+        }
+      }
+
+      Error(_) -> image.empty
+    }
+
+    let espaco_poderes =
+      image.overlay(
+        poderes,
+        image.rectangle(largura, 36, fill.white),
+      )
 
   let placar =
     list.fold(partida.placares, image.empty, fn(cena, p) {
@@ -1459,7 +1754,7 @@ pub fn tela_partida(
       )
     })
 
-  let tabuleiro = grade(partida)
+  let tabuleiro = grade(partida, imagens_poderes)
 
   let tabuleiro = case
     list.find(partida.jogadores, fn(j) { j.id == id && j.reaparecimento > 0 })
@@ -1484,13 +1779,16 @@ pub fn tela_partida(
     Error(_) -> tabuleiro
   }
 
-  image.above(
+  let cabecalho =
     image.above(
-      image.text("Tempo: " <> int.to_string(segundos) <> " s", 24, fill.black),
-      placar,
-    ),
-    tabuleiro,
-  )
+      image.above(
+        image.text("Tempo: " <> int.to_string(segundos) <> " s", 24, fill.black),
+        placar,
+      ),
+      espaco_poderes,
+    )
+
+  image.above(cabecalho, tabuleiro)
 }
 
 /// Mostra os placares finais e permite reiniciar.
