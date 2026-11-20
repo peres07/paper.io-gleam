@@ -38,6 +38,7 @@
 // - Tecla 2: utiliza um poder de velocidade armazenado.
 
 import gleam/int
+import gleam/float
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -74,7 +75,7 @@ const largura = 400
 const altura = 520
 
 /// Velocidade da cobra
-const velocidade_cobra = 1
+const velocidade_cobra = 1.0
 
 // ----------------------------------------------------------------------
 // Tipos de dados
@@ -435,8 +436,9 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
         })
 
       let atualizada = Partida(..partida, tiques: tiques, jogadores: jogadores)
+      let intervalo_movimento = int.max(1, float.round(6.0 /. velocidade_cobra))
 
-      let movimentada = case tiques % 4 == 0 {
+      let movimentada = case tiques % intervalo == 0 {
         True ->
           list.fold(jogadores, atualizada, fn(acumulada, jogador) {
             case jogador.direcoes {
@@ -807,7 +809,7 @@ pub fn adicionar_rastro(pos: Posicao, rastro: List(Posicao)) -> List(Posicao) {
 // Flood Fill
 // ----------------------------------------------------------------------
 
-/// Estado de uma casa na máscara 
+/// Estado de uma casa na máscara
 pub type EstadoCasa {
   NaoExplorada
   TerritorioOuRastro
@@ -842,7 +844,7 @@ pub fn criar_mascara(partida: Partida, jogador: Jogador) -> List(EstadoCasa) {
 }
 
 /// Retorna True se a posição não pode ser explorada,
-/// ou seja, se está fora do mapa, é território ou 
+/// ou seja, se está fora do mapa, é território ou
 /// rastro, ou se já foi explorada
 pub fn marcada(mascara: List(EstadoCasa), pos: Posicao) -> Bool {
   case dentro_do_mapa(pos) {
@@ -991,7 +993,7 @@ fn procurar_conexoes(
 }
 
 /// Explora as posições pendentes, preenchendo um trecho
-/// por vez como Exterior. Para cada trecho, procura passagens 
+/// por vez como Exterior. Para cada trecho, procura passagens
 /// acima e abaixo e as adiciona às pendentes.
 pub fn scanline_fill(
   mascara: List(EstadoCasa),
