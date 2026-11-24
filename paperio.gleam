@@ -436,8 +436,8 @@ pub fn processa_tecla(estado: Estado, numero: Int, tecla: key.Event) -> Estado {
   case estado, tecla {
     Abertura(gerador, imagens), key.Enter ->
       EmPartida(gerador, imagens, nova_partida())
-    Resultado(gerador, imagens, jogadores), key.Enter ->
-      EmPartida(gerador, imagens, nova_partida())
+    Resultado(gerador, imagens, _), key.Enter ->
+      Abertura(gerador, imagens)
     EmPartida(gerador, imagens, partida), key.Char("1") ->
       EmPartida(gerador, imagens, ativar_poder(partida, numero, Expansao))
     EmPartida(gerador, imagens, partida), key.Char("2") ->
@@ -803,7 +803,7 @@ pub fn mover_jogador(
     False -> Error(Nil)
   }
 
-  let jogador_atualizado1 = case poder {
+  let jogador_com_poder = case poder {
     Ok(p) -> {
       Jogador(..jogador, poderes_guardados: [
         p.tipo,
@@ -829,9 +829,9 @@ pub fn mover_jogador(
     False -> atualizar_rastro(partida, jogador, nova_pos)
   }
 
-  let jogador_atualizado2 = case cortou_rastro {
-    True -> reinicia_jogador(jogador_atualizado1)
-    False -> Jogador(..jogador_atualizado1, posicao: nova_pos, rastro: rastro)
+  let jogador_movido = case cortou_rastro {
+    True -> reinicia_jogador(jogador_com_poder)
+    False -> Jogador(..jogador_com_poder, posicao: nova_pos, rastro: rastro)
   }
   let novo_adversario = case cortou_rastro_adversario {
     True -> reinicia_jogador(adversario)
@@ -840,7 +840,7 @@ pub fn mover_jogador(
 
   let jogadores =
     atualiza_jogador(partida.jogadores, jogador.id, fn(_) {
-      jogador_atualizado2
+      jogador_movido
     })
     |> atualiza_jogador(adversario.id, fn(_) { novo_adversario })
 
@@ -1367,6 +1367,11 @@ pub fn remover_poder(
 }
 
 pub fn ativar_expansao(j: Jogador, partida: Partida) -> Partida {
+  let base_adversaria =
+    case list.find(partida.jogadores, fn(outro) { outro.id != j.id }) {
+      Ok(adversario) -> adversario.base
+      Error(_) -> []
+    }
   let mapa =
     list.map(partida.mapa, fn(casa) {
       let perto =
@@ -1375,12 +1380,7 @@ pub fn ativar_expansao(j: Jogador, partida: Partida) -> Partida {
         && casa.posicao.col >= j.posicao.col - 1
         && casa.posicao.col <= j.posicao.col + 1
 
-      let base_adversaria =
-        list.any(partida.jogadores, fn(outro) {
-          outro.id != j.id && list.contains(outro.base, casa.posicao)
-        })
-
-      case perto && !base_adversaria {
+      case perto && !list.contains(base_adversaria, casa.posicao) {
         True -> Casa(..casa, dono: Some(j.id))
         False -> casa
       }
@@ -1403,28 +1403,30 @@ pub fn ativar_poder(
       case list.contains(jogador.poderes_guardados, tipo) {
         False -> partida
         True -> {
-          let atualizada = case tipo {
-            Velocidade -> {
-              let jogadores =
-                atualiza_jogador(partida.jogadores, jogador_id, fn(j) {
-                  Jogador(
-                    ..j,
-                    velocidade: velocidade_boost,
-                    velocidade_extra: boost_tempo,
-                  )
-                })
+          let jogador =
+            Jogador(
+              ..jogador,
+              poderes_guardados: remover_poder(jogador.poderes_guardados, tipo),
+            )
 
-              Partida(..partida, jogadores: jogadores)
-            }
+          let jogador = case tipo {
+            Velocidade ->
+              Jogador(
+                ..jogador,
+                velocidade: velocidade_boost,
+                velocidade_extra: boost_tempo,
+              )
+            Expansao -> jogador
+          }
+
+          let atualizada = case tipo {
             Expansao -> ativar_expansao(jogador, partida)
+            Velocidade -> partida
           }
 
           let jogadores =
-            atualiza_jogador(atualizada.jogadores, jogador_id, fn(j) {
-              Jogador(
-                ..j,
-                poderes_guardados: remover_poder(j.poderes_guardados, tipo),
-              )
+            atualiza_jogador(atualizada.jogadores, jogador_id, fn(_) {
+              jogador
             })
 
           Partida(..atualizada, jogadores: jogadores)
@@ -1584,10 +1586,12 @@ pub fn tela_partida(
   partida: Partida,
   id: Int,
 ) -> Image {
+  let jogador = busca_jogador(partida.jogadores, id)
+
   let segundos =
     { duracao - partida.tiques + tiques_por_segundo - 1 } / tiques_por_segundo
 
-  let poderes = case busca_jogador(partida.jogadores, id) {
+  let poderes = case jogador {
     Ok(j) -> {
       case j.poderes_guardados {
         [] -> image.empty
@@ -1637,12 +1641,10 @@ pub fn tela_partida(
 
   let tabuleiro = grade(partida, imagens_poderes)
 
-  let tabuleiro = case
-    list.find(partida.jogadores, fn(j) { j.id == id && j.reaparecimento > 0 })
-  {
-    Ok(jogador) -> {
+  let tabuleiro = case jogador {
+    Ok(j) if j.reaparecimento > 0 -> {
       let segundos_restantes =
-        { jogador.reaparecimento + tiques_por_segundo - 1 } / tiques_por_segundo
+        { j.reaparecimento + tiques_por_segundo - 1 } / tiques_por_segundo
 
       let aviso =
         image.overlay(
@@ -1657,7 +1659,7 @@ pub fn tela_partida(
       image.overlay(aviso, tabuleiro)
     }
 
-    Error(_) -> tabuleiro
+    _ -> tabuleiro
   }
 
   let cabecalho =
@@ -1672,7 +1674,24 @@ pub fn tela_partida(
   image.above(cabecalho, tabuleiro)
 }
 
-/// Mostra os placares finais e permite reiniciar.
+/// Devolve a mensagem do resultado para o jogador indicado.
+pub fn mensagem_resultado(placares: List(Placar), id: Int) -> String {
+  let seu_placar = list.find(placares, fn(p) { p.jogador == id })
+  let adversario = list.find(placares, fn(p) { p.jogador != id })
+
+  case seu_placar, adversario {
+    Ok(seu), Ok(outro) -> {
+      case seu.casas > outro.casas, seu.casas == outro.casas {
+        True, _ -> "Você venceu!"
+        _, True -> "Empate!"
+        _, _ -> "Derrota!"
+      }
+    }
+    _, _ -> "Fim da partida"
+  }
+}
+
+/// Mostra o resultado e os placares finais e permite voltar à abertura.
 pub fn tela_resultado(placares: List(Placar), id: Int) -> Image {
   let placar =
     list.fold(placares, image.empty, fn(cena, p) {
@@ -1692,10 +1711,10 @@ pub fn tela_resultado(placares: List(Placar), id: Int) -> Image {
     })
 
   image.above(
-    image.text("Fim da partida", 32, fill.black),
+    image.text(mensagem_resultado(placares, id), 32, fill.black),
     image.above(
       placar,
-      image.text("Pressione Enter para jogar novamente", 20, fill.black),
+      image.text("Pressione Enter para voltar ao menu", 20, fill.black),
     ),
   )
 }
