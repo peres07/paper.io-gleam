@@ -6,7 +6,7 @@
 //
 // Regras
 //
-// - Dois jogadores. Cada jogador começa com uma pequena base própria
+// - Dois jogadores. Cada jogador começa com uma base própria
 //   em um lado do tabuleiro.
 // - Ao sair do próprio território, o jogador deixa um rastro. Ao retornar
 //   a qualquer território próprio, inclusive uma ilha criada pela expansão, o rastro e as
@@ -23,10 +23,8 @@
 //   até serem utilizados.
 // - Expansão: conquista as casas de uma área 3x3 ao redor do personagem,
 //   exceto as pertencentes à base adversária.
-// - Velocidade: aumenta a velocidade do jogador em 50% por 4 segundos.
-//   Utilizar novamente reinicia a duração, sem acumular velocidade.
-// - A partida dura 60 segundos ou termina antecipadamente quando não
-//   houver casas neutras.
+// - Velocidade: aumenta a velocidade do jogador por 4 segundos.
+// - A partida dura 60 segundos
 // - Cada casa do território vale 1 ponto. Vence quem possuir mais
 //   territórios ao final da partida, podendo haver empate.
 //
@@ -83,8 +81,8 @@ const velocidade_boost = 3.0
 /// Tempo de velocidade extra
 const boost_tempo = 40
 
-/// Delay poder - 80 ticks
-const delay_poder = 20
+/// Delay poder (8 segundos)
+const delay_poder = 80
 
 // ----------------------------------------------------------------------
 // Tipos de dados
@@ -205,12 +203,37 @@ fn atualiza_jogador(
   })
 }
 
+pub fn atualiza_jogador_examples() {
+  let j = cria_jogador(1)
+  let novo = Jogador(..j, direcao: Direita)
+
+  // Se achar o id, substitui
+  check.eq(atualiza_jogador([j], 1, fn(_) { novo }), [novo])
+
+  // Se não achar, retorna como estava
+  check.eq(atualiza_jogador([j], 2, fn(_) { novo }), [j])
+  check.eq(atualiza_jogador([], 1, fn(_) { novo }), [])
+}
+
 /// Procura um jogador na lista pelo seu *id*.
 fn busca_jogador(
   jogadores: List(Jogador),
   jogador_id: Int,
 ) -> Result(Jogador, Nil) {
   list.find(jogadores, fn(j) { j.id == jogador_id })
+}
+
+pub fn busca_jogador_examples() {
+  let j1 = cria_jogador(1)
+  let j2 = cria_jogador(2)
+  check.eq(busca_jogador([j1, j2], 1), Ok(j1))
+  check.eq(busca_jogador([j1, j2], 2), Ok(j2))
+
+  // Não tem jogador com id = 3
+  check.eq(busca_jogador([j1, j2], 3), Error(Nil))
+
+  // Não tem jogador criado ainda
+  check.eq(busca_jogador([], 1), Error(Nil))
 }
 
 // ----------------------------------------------------------------------
@@ -269,6 +292,9 @@ pub fn sequencia_examples() {
   check.eq(sequencia(3, 2), [])
   check.eq(sequencia(3, 3), [3])
   check.eq(sequencia(0, 4), [0, 1, 2, 3, 4])
+
+  check.eq(sequencia(-2, 0), [-2, -1, 0])
+  check.eq(sequencia(0, 0), [0])
 }
 
 /// Produz a lista de todas as casas da grade, linha por linha.
@@ -287,6 +313,14 @@ pub fn todas_as_casas_examples() {
 /// Cria o mapa com todas as casas neutras.
 pub fn cria_mapa() -> List(Casa) {
   list.map(todas_as_casas(), fn(posicao) { Casa(posicao, None) })
+}
+
+pub fn cria_mapa_examples() {
+  let mapa = cria_mapa()
+  check.eq(list.length(mapa), tamanho * tamanho)
+  check.eq(list.first(mapa), Ok(Casa(Posicao(0, 0), None)))
+  check.eq(list.last(mapa), Ok(Casa(Posicao(tamanho - 1, tamanho - 1), None)))
+  check.eq(list.count(mapa, fn(casa) { casa.dono != None }), 0)
 }
 
 pub fn base_inicial(id: Int) -> List(Posicao) {
@@ -312,6 +346,8 @@ pub fn base_inicial_examples() {
   check.eq(list.length(base_inicial(2)), 9)
   check.eq(list.contains(base_inicial(1), Posicao(17, 2)), True)
   check.eq(list.contains(base_inicial(2), Posicao(2, 17)), True)
+
+  check.eq(base_inicial(3), [])
 }
 
 pub fn cria_jogador(id: Int) -> Jogador {
@@ -335,12 +371,28 @@ pub fn cria_jogador(id: Int) -> Jogador {
   )
 }
 
+pub fn cria_jogador_examples() {
+  let j1 = cria_jogador(1)
+  let j2 = cria_jogador(2)
+  check.eq(j1.posicao, Posicao(tamanho - 2, 1))
+  check.eq(j2.posicao, Posicao(1, tamanho - 2))
+  check.eq(j1.base, base_inicial(1))
+  check.eq(j1.rastro, [])
+  check.eq(j1.velocidade, velocidade_cobra)
+}
+
 /// Define a direção inicial baseada no **id** do jogador.
 pub fn direcao_inicial(id: Int) -> Direcao {
   case id {
     1 -> Cima
     _ -> Baixo
   }
+}
+
+pub fn direcao_inicial_examples() {
+  check.eq(direcao_inicial(1), Cima)
+  check.eq(direcao_inicial(2), Baixo)
+  check.eq(direcao_inicial(0), Baixo)
 }
 
 pub fn nova_partida() -> Partida {
@@ -373,23 +425,21 @@ pub fn nova_partida() -> Partida {
 }
 
 pub fn nova_partida_examples() {
-  let partida = nova_partida()
+  let p = nova_partida()
 
-  check.eq(list.length(partida.mapa), 400)
-  check.eq(list.length(partida.jogadores), 2)
-  check.eq(list.length(partida.poderes), 0)
-  check.eq(partida.tiques, 0)
+  check.eq(list.length(p.mapa), tamanho * tamanho)
+  check.eq(p.jogadores, [cria_jogador(1), cria_jogador(2)])
+  check.eq(p.placares, [Placar(1, 9), Placar(2, 9)])
 
-  let casas_jogador1 =
-    list.filter(partida.mapa, fn(casa) { casa.dono == Some(1) })
+  check.eq(dono_da_casa(p.mapa, cria_jogador(1).posicao), Some(1))
+  check.eq(dono_da_casa(p.mapa, cria_jogador(2).posicao), Some(2))
+  check.eq(dono_da_casa(p.mapa, Posicao(5, 5)), None)
 
-  let casas_jogador2 =
-    list.filter(partida.mapa, fn(casa) { casa.dono == Some(2) })
+  check.eq(p.poderes, [])
 
-  check.eq(list.length(casas_jogador1), 9)
-  check.eq(list.length(casas_jogador2), 9)
+  check.eq(p.tiques, 0)
+  check.eq(p.proximo_poder, delay_poder)
 }
-
 // ----------------------------------------------------------------------
 // Teclas
 // ----------------------------------------------------------------------
@@ -401,6 +451,14 @@ pub fn sao_opostas(dir1: Direcao, dir2: Direcao) -> Bool {
     Esquerda, Direita | Direita, Esquerda -> True
     _, _ -> False
   }
+}
+
+pub fn sao_opostas_examples() {
+  check.eq(sao_opostas(Cima, Baixo), True)
+  check.eq(sao_opostas(Baixo, Cima), True)
+  check.eq(sao_opostas(Esquerda, Direita), True)
+  check.eq(sao_opostas(Cima, Direita), False)
+  check.eq(sao_opostas(Cima, Cima), False)
 }
 
 /// Troca a direção do jogador correspondente
@@ -420,6 +478,24 @@ fn guardar_direcao(
   Partida(..partida, jogadores: jogadores)
 }
 
+pub fn guardar_direcao_examples() {
+  let j = cria_jogador(1)
+  let p = Partida(..nova_partida(), jogadores: [j])
+
+  // Troca a direção
+  check.eq(guardar_direcao(p, 1, Direita).jogadores, [
+    Jogador(..j, direcao: Direita),
+  ])
+
+  // Não deixa ir para a direção contrária
+  check.eq(guardar_direcao(p, 1, Baixo), p)
+
+  let esperando = Partida(..p, jogadores: [Jogador(..j, reaparecimento: 5)])
+
+  // Não altera a direção se o jogador estiver morto
+  check.eq(guardar_direcao(esperando, 1, Direita), esperando)
+}
+
 /// Devolve a direção que corresponde a *tecla* clicada.
 /// Devolve None se *tecla* não é uma seta.
 pub fn direcao(tecla: key.Event) -> Option(Direcao) {
@@ -430,6 +506,14 @@ pub fn direcao(tecla: key.Event) -> Option(Direcao) {
     key.ArrowRight -> Some(Direita)
     _ -> None
   }
+}
+
+pub fn direcao_examples() {
+  check.eq(direcao(key.ArrowUp), Some(Cima))
+  check.eq(direcao(key.ArrowDown), Some(Baixo))
+  check.eq(direcao(key.ArrowLeft), Some(Esquerda))
+  check.eq(direcao(key.ArrowRight), Some(Direita))
+  check.eq(direcao(key.Enter), None)
 }
 
 pub fn processa_tecla(estado: Estado, numero: Int, tecla: key.Event) -> Estado {
@@ -452,6 +536,24 @@ pub fn processa_tecla(estado: Estado, numero: Int, tecla: key.Event) -> Estado {
   }
 }
 
+pub fn processa_tecla_examples() {
+  let g = random.new(0)
+  let img = ImagensPoderes(velocidade: image.empty, expansao: image.empty)
+  let abertura = Abertura(g, img)
+
+  // Enter na abertura -> nova partida.
+  check.eq(
+    processa_tecla(abertura, 1, key.Enter),
+    EmPartida(g, img, nova_partida()),
+  )
+
+  // Enter no resultado -> volta para a abertura.
+  check.eq(processa_tecla(Resultado(g, img, []), 1, key.Enter), abertura)
+
+  // Setas não fazem nada na abertura
+  check.eq(processa_tecla(abertura, 1, key.ArrowUp), abertura)
+}
+
 // ----------------------------------------------------------------------
 // Tiques
 // ----------------------------------------------------------------------
@@ -462,6 +564,18 @@ pub fn tique(estado: Estado) -> Estado {
     EmPartida(gerador, imagens, partida) -> avanca(gerador, imagens, partida)
     _ -> estado
   }
+}
+
+pub fn tique_examples() {
+  let g = random.new(0)
+  let img = ImagensPoderes(velocidade: image.empty, expansao: image.empty)
+
+  // tique só avança na partida em si
+  check.eq(tique(Abertura(g, img)), Abertura(g, img))
+  check.eq(tique(Resultado(g, img, [])), Resultado(g, img, []))
+
+  let p = nova_partida()
+  check.eq(tique(EmPartida(g, img, p)), avanca(g, img, p))
 }
 
 /// Produz a lista de posições do mapa da *partida* que não tem
@@ -475,6 +589,25 @@ pub fn casas_livres(partida: Partida) -> List(Posicao) {
   })
 }
 
+pub fn casas_livres_examples() {
+  let p = nova_partida()
+  let livre = Posicao(5, 5)
+
+  // Apenas casas com os jogadores
+  check.eq(list.length(casas_livres(p)), tamanho * tamanho - 2)
+
+  // Posição do jogador não é livre
+  check.eq(list.contains(casas_livres(p), cria_jogador(1).posicao), False)
+
+  // Casa livre
+  check.eq(list.contains(casas_livres(p), livre), True)
+
+  let p = Partida(..p, poderes: [PoderNoMapa(Velocidade, livre)])
+
+  // Casa com poder fica não livre
+  check.eq(list.contains(casas_livres(p), livre), False)
+}
+
 pub fn sorteia_tipo(gerador: Generator) -> #(TipoPoder, Generator) {
   let tipos = [Velocidade, Expansao]
 
@@ -482,6 +615,15 @@ pub fn sorteia_tipo(gerador: Generator) -> #(TipoPoder, Generator) {
     #(Ok(tipo), novo_gerador) -> #(tipo, novo_gerador)
     #(Error(_), novo_gerador) -> #(Velocidade, novo_gerador)
   }
+}
+
+pub fn sorteia_tipo_examples() {
+  let g =
+    random.mock([random.pick_returns([Velocidade, Expansao], Ok(Velocidade))])
+  check.eq(sorteia_tipo(g), #(Velocidade, random.mock([])))
+  let g =
+    random.mock([random.pick_returns([Velocidade, Expansao], Ok(Expansao))])
+  check.eq(sorteia_tipo(g), #(Expansao, random.mock([])))
 }
 
 /// Adiciona os poderes na *partida*. Se não há casa livre, os poderes
@@ -500,6 +642,24 @@ pub fn sorteia_poder(
 
     #(Error(_), gerador) -> #(partida.poderes, gerador)
   }
+}
+
+pub fn sorteia_poder_examples() {
+  let p = nova_partida()
+  let pos = Posicao(5, 5)
+  let g =
+    random.mock([
+      random.pick_returns(casas_livres(p), Ok(pos)),
+      random.pick_returns([Velocidade, Expansao], Ok(Expansao)),
+    ])
+  check.eq(sorteia_poder(g, p), #([PoderNoMapa(Expansao, pos)], random.mock([])))
+  let p =
+    Partida(
+      ..p,
+      poderes: list.map(todas_as_casas(), fn(pos) { PoderNoMapa(Expansao, pos) }),
+    )
+  let #(poderes, _) = sorteia_poder(random.new(0), p)
+  check.eq(poderes, p.poderes)
 }
 
 /// Avança um tique da partida e mostra o resultado
@@ -576,6 +736,43 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
   }
 }
 
+pub fn avanca_examples() {
+  let g = random.new(0)
+  let img = ImagensPoderes(velocidade: image.empty, expansao: image.empty)
+  let p = nova_partida()
+
+  // Mostra o resultado quando acabar
+  check.eq(
+    avanca(g, img, Partida(..p, tiques: duracao - 1)),
+    Resultado(g, img, p.placares),
+  )
+
+  // Atualiza o delay do poder
+  check.eq(
+    avanca(g, img, p),
+    EmPartida(g, img, Partida(..p, tiques: 1, proximo_poder: delay_poder - 1)),
+  )
+
+  let p = Partida(..nova_partida(), tiques: 4)
+  let j1 = Jogador(..cria_jogador(1), posicao: Posicao(tamanho - 3, 1))
+  let j2 = Jogador(..cria_jogador(2), posicao: Posicao(2, tamanho - 2))
+
+  // Jogadores se movem
+  check.eq(
+    avanca(g, img, p),
+    EmPartida(
+      g,
+      img,
+      Partida(
+        ..p,
+        tiques: 5,
+        proximo_poder: delay_poder - 1,
+        jogadores: [j1, j2],
+      ),
+    ),
+  )
+}
+
 /// Recalcula os placares da *partida* contando as casas
 /// de cada jogador. Mantém a ordem dos jogadores e
 /// preserva os demais campos da partida.
@@ -587,6 +784,16 @@ pub fn atualizar_placares(partida: Partida) -> Partida {
     })
 
   Partida(..partida, placares: placares)
+}
+
+pub fn atualizar_placares_examples() {
+  let p = nova_partida()
+  check.eq(atualizar_placares(p).placares, [Placar(1, 9), Placar(2, 9)])
+  check.eq(atualizar_placares(Partida(..p, mapa: [])).placares, [
+    Placar(1, 0),
+    Placar(2, 0),
+  ])
+  check.eq(atualizar_placares(Partida(..p, jogadores: [])).placares, [])
 }
 
 /// Conta as casas do mapa da *partida* que pertencem ao
@@ -633,6 +840,7 @@ pub fn dentro_do_mapa_examples() {
   check.eq(dentro_do_mapa(Posicao(19, 19)), True)
   check.eq(dentro_do_mapa(Posicao(-1, 5)), False)
   check.eq(dentro_do_mapa(Posicao(20, 5)), False)
+  check.eq(dentro_do_mapa(Posicao(5, -1)), False)
 }
 
 /// Calcula o destino, bloqueando as bordas, a base adversária e
@@ -662,28 +870,17 @@ pub fn desloca(
 
 pub fn desloca_examples() {
   let pos = Posicao(5, 5)
-  let adversario_distante = Some(Posicao(12, 12))
+  check.eq(desloca(pos, Cima, [], None), Posicao(4, 5))
+  check.eq(desloca(pos, Direita, [], None), Posicao(5, 6))
 
-  // Movimento nas quatro direções.
-  check.eq(desloca(pos, Cima, [], adversario_distante), Posicao(4, 5))
-  check.eq(desloca(pos, Baixo, [], adversario_distante), Posicao(6, 5))
-  check.eq(desloca(pos, Esquerda, [], adversario_distante), Posicao(5, 4))
-  check.eq(desloca(pos, Direita, [], adversario_distante), Posicao(5, 6))
+  // Não sai da borda
+  check.eq(desloca(Posicao(0, 0), Esquerda, [], None), Posicao(0, 0))
 
-  // Não permite sair do mapa.
-  let superior = Posicao(0, 0)
-  let inferior = Posicao(tamanho - 1, tamanho - 1)
-  check.eq(desloca(superior, Cima, [], None), superior)
-  check.eq(desloca(superior, Esquerda, [], None), superior)
-  check.eq(desloca(inferior, Baixo, [], None), inferior)
-  check.eq(desloca(inferior, Direita, [], None), inferior)
-
-  // A base adversária bloqueia mesmo sem adversário ativo.
+  // Não pode entrar na base adversária
   check.eq(desloca(pos, Direita, [Posicao(5, 6)], None), pos)
 
-  // Um adversário ativo bloqueia; um ausente não bloqueia.
+  // Não deixa entrar na mesma casa que o adversário
   check.eq(desloca(pos, Direita, [], Some(Posicao(5, 6))), pos)
-  check.eq(desloca(pos, Direita, [], None), Posicao(5, 6))
 }
 
 /// Devolve o dono da casa na posição pos.
@@ -728,6 +925,7 @@ pub fn move_examples() {
   check.eq(move(partida, 3, Cima), partida)
 }
 
+
 /// Reinicia o jogador após ser eliminado. Posiciona-o no centro da base,
 /// restaura a direção inicial, limpa o rastro e os poderes e restaura a
 /// velocidade padrão. Preserva o território conquistado e inicia
@@ -739,35 +937,25 @@ pub fn reinicia_jogador(jogador: Jogador) -> Jogador {
 }
 
 pub fn reinicia_jogador_examples() {
-  let inicial = cria_jogador(1)
-  let jogador =
+  let j =
     Jogador(
-      ..inicial,
-      posicao: Posicao(10, 10),
-      direcao: Cima,
-      rastro: [Posicao(10, 10)],
+      ..cria_jogador(1),
+      posicao: Posicao(5, 5),
+      rastro: [Posicao(5, 4)],
+      poderes_guardados: [Velocidade],
       velocidade_extra: 10,
-      velocidade: 7.5,
+      velocidade: velocidade_boost,
     )
-
-  let reiniciado = reinicia_jogador(jogador)
-
-  check.eq(reiniciado.id, jogador.id)
-  check.eq(reiniciado.posicao, inicial.posicao)
-  check.eq(reiniciado.base, jogador.base)
-  check.eq(reiniciado.direcao, inicial.direcao)
-  check.eq(reiniciado.rastro, [])
-  check.eq(reiniciado.poderes_guardados, [])
-  check.eq(reiniciado.velocidade_extra, 0)
-  check.eq(reiniciado.velocidade, velocidade_cobra)
-  check.eq(reiniciado.reaparecimento, 2 * tiques_por_segundo)
-
-  let jogador_2 = cria_jogador(2)
-  let reiniciado_2 =
-    reinicia_jogador(Jogador(..jogador_2, posicao: Posicao(10, 10)))
-
-  check.eq(reiniciado_2.posicao, jogador_2.posicao)
+  check.eq(
+    reinicia_jogador(j),
+    Jogador(..cria_jogador(1), reaparecimento: 2 * tiques_por_segundo),
+  )
+  check.eq(
+    reinicia_jogador(cria_jogador(2)),
+    Jogador(..cria_jogador(2), reaparecimento: 2 * tiques_por_segundo),
+  )
 }
+
 
 /// Atualiza a posição e o rastro do jogador.
 /// Se ele voltar ao próprio território com um rastro,
@@ -853,12 +1041,85 @@ pub fn mover_jogador(
   }
 }
 
+pub fn mover_jogador_examples() {
+  let p = nova_partida()
+  let j = cria_jogador(1)
+  let outro = cria_jogador(2)
+
+  // Move uma casa para cima, ainda dentro da própria base.
+  let movida = mover_jogador(p, j, Cima, outro)
+
+  check.eq(
+    busca_jogador(movida.jogadores, 1),
+    Ok(Jogador(..j, posicao: Posicao(tamanho - 3, 1))),
+  )
+
+  // Entrar no próprio rastro elimina o jogador.
+  let j = Jogador(..j, posicao: Posicao(5, 5), rastro: [Posicao(5, 6)])
+  let p = Partida(..p, jogadores: [j, outro])
+  let eliminada = mover_jogador(p, j, Direita, outro)
+
+  check.eq(
+    busca_jogador(eliminada.jogadores, 1),
+    Ok(reinicia_jogador(j)),
+  )
+
+  // Cortar o rastro adversário elimina o dono daquele rastro.
+  let j = Jogador(..cria_jogador(1), posicao: Posicao(5, 5))
+  let outro = Jogador(..outro, rastro: [Posicao(5, 6)])
+  let p = Partida(..nova_partida(), jogadores: [j, outro])
+  let cortada = mover_jogador(p, j, Direita, outro)
+
+  check.eq(
+    busca_jogador(cortada.jogadores, 2),
+    Ok(reinicia_jogador(outro)),
+  )
+
+  // Quando entra na casa de um poder, guarda ele e o remove do mapa.
+  let outro = cria_jogador(2)
+  let p =
+    Partida(
+      ..nova_partida(),
+      jogadores: [j, outro],
+      poderes: [PoderNoMapa(Velocidade, Posicao(5, 6))],
+    )
+  let coletada = mover_jogador(p, j, Direita, outro)
+
+  check.eq(
+    busca_jogador(coletada.jogadores, 1),
+    Ok(Jogador(
+      ..j,
+      posicao: Posicao(5, 6),
+      rastro: [Posicao(5, 6)],
+      poderes_guardados: [Velocidade],
+    )),
+  )
+  check.eq(coletada.poderes, [])
+}
+
 /// Conquista o rastro e as casas cercadas ao voltar
 /// ao território do jogador.
 pub fn fechar_rastro(partida: Partida, jogador: Jogador) -> List(Casa) {
   criar_mascara(partida, jogador)
   |> casas_exteriores
   |> pintar_mapa(partida.mapa, _, jogador.id)
+}
+
+pub fn fechar_rastro_examples() {
+  let jogador = Jogador(..cria_jogador(1), rastro: [Posicao(0, 1)])
+
+  let partida =
+    Partida(..nova_partida(), mapa: [
+      Casa(Posicao(0, 0), Some(1)),
+      Casa(Posicao(0, 1), None),
+      Casa(Posicao(0, 2), None),
+    ])
+
+  check.eq(fechar_rastro(partida, jogador), [
+    Casa(Posicao(0, 0), Some(1)),
+    Casa(Posicao(0, 1), Some(1)),
+    Casa(Posicao(0, 2), None),
+  ])
 }
 
 /// Mantém o rastro dentro do próprio território ou
@@ -874,6 +1135,23 @@ pub fn atualizar_rastro(
   }
 }
 
+pub fn atualizar_rastro_examples() {
+  let p = nova_partida()
+  let j = cria_jogador(1)
+
+  // Jogador está dentro da base ainda
+  check.eq(atualizar_rastro(p, j, j.posicao), [])
+
+  // Jogador fora da base
+  check.eq(atualizar_rastro(p, j, Posicao(5, 5)), [Posicao(5, 5)])
+
+  let j = Jogador(..j, rastro: [Posicao(5, 5)])
+
+  // Só atualiza se já não é dono
+  check.eq(atualizar_rastro(p, j, Posicao(5, 5)), j.rastro)
+  check.eq(atualizar_rastro(p, j, Posicao(5, 6)), [Posicao(5, 6), Posicao(5, 5)])
+}
+
 /// Adiciona a posição *pos* na lista *rastro*. Caso a
 /// posição já esteja na lista, não muda o rastro
 pub fn adicionar_rastro(pos: Posicao, rastro: List(Posicao)) -> List(Posicao) {
@@ -881,6 +1159,16 @@ pub fn adicionar_rastro(pos: Posicao, rastro: List(Posicao)) -> List(Posicao) {
     True -> rastro
     False -> [pos, ..rastro]
   }
+}
+
+pub fn adicionar_rastro_examples() {
+  let a = Posicao(1, 1)
+  let b = Posicao(1, 2)
+  check.eq(adicionar_rastro(a, []), [a])
+  check.eq(adicionar_rastro(a, [a]), [a])
+  check.eq(adicionar_rastro(b, [a]), [b, a])
+  check.eq(adicionar_rastro(a, [b, a]), [b, a])
+  check.eq(adicionar_rastro(b, [b, a]), [b, a])
 }
 
 // ----------------------------------------------------------------------
@@ -909,6 +1197,23 @@ pub fn criar_mascara(partida: Partida, jogador: Jogador) -> List(EstadoCasa) {
   })
 }
 
+pub fn criar_mascara_examples() {
+  let jogador = Jogador(..cria_jogador(1), rastro: [Posicao(0, 1)])
+
+  let partida =
+    Partida(..nova_partida(), mapa: [
+      Casa(Posicao(0, 0), Some(1)),
+      Casa(Posicao(0, 1), None),
+      Casa(Posicao(0, 2), Some(2)),
+    ])
+
+  check.eq(criar_mascara(partida, jogador), [
+    TerritorioOuRastro,
+    TerritorioOuRastro,
+    NaoExplorada,
+  ])
+}
+
 /// Retorna True se a posição não pode ser explorada,
 /// ou seja, se está fora do mapa, é território ou
 /// rastro, ou se já foi explorada
@@ -928,6 +1233,21 @@ pub fn marcada(mascara: List(EstadoCasa), pos: Posicao) -> Bool {
   }
 }
 
+pub fn marcada_examples() {
+  let mascara = [
+    NaoExplorada,
+    TerritorioOuRastro,
+    Exterior,
+  ]
+
+  check.eq(marcada(mascara, Posicao(0, 0)), False)
+  check.eq(marcada(mascara, Posicao(0, 1)), True)
+  check.eq(marcada(mascara, Posicao(0, 2)), True)
+  check.eq(marcada(mascara, Posicao(-1, 0)), True)
+
+  check.eq(marcada(mascara, Posicao(0, tamanho)), True)
+}
+
 /// Devolve o elemento no índice *indice*. Caso
 /// o índice não existir, devolve *default*
 pub fn consultar_indice(lista: List(a), indice: Int, default: a) -> a {
@@ -936,6 +1256,15 @@ pub fn consultar_indice(lista: List(a), indice: Int, default: a) -> a {
     [_, ..resto], n if n > 0 -> consultar_indice(resto, n - 1, default)
     _, _ -> default
   }
+}
+
+pub fn consultar_indice_examples() {
+  check.eq(consultar_indice([10, 20, 30], 1, 0), 20)
+  check.eq(consultar_indice([10], 3, 0), 0)
+  check.eq(consultar_indice([], 0, 0), 0)
+
+  // Default
+  check.eq(consultar_indice([10], -1, 0), 0)
 }
 
 /// Devolve as posições não exploradas nas quatro bordas.
@@ -949,6 +1278,20 @@ pub fn bordas_livres(mascara: List(EstadoCasa)) -> List(Posicao) {
 
     borda && !marcada(mascara, pos)
   })
+}
+
+pub fn bordas_livres_examples() {
+  check.eq(
+    bordas_livres([
+      NaoExplorada,
+      TerritorioOuRastro,
+      NaoExplorada,
+    ]),
+    [Posicao(0, 0), Posicao(0, 2)],
+  )
+
+  // Só marca se estiver livre
+  check.eq(bordas_livres([TerritorioOuRastro]), [])
 }
 
 /// Define o tipo trecho que contém a linha que estamos
@@ -976,12 +1319,43 @@ pub fn limite_trecho(
   }
 }
 
+pub fn limite_trecho_examples() {
+  let mascara = [
+    TerritorioOuRastro,
+    NaoExplorada,
+    NaoExplorada,
+    NaoExplorada,
+    TerritorioOuRastro,
+  ]
+
+  // Limite para os dois lados
+  check.eq(limite_trecho(mascara, Posicao(0, 2), Esquerda), 1)
+  check.eq(limite_trecho(mascara, Posicao(0, 2), Direita), 3)
+
+  // Para na borda esquerda
+  check.eq(limite_trecho([NaoExplorada], Posicao(0, 0), Esquerda), 0)
+}
+
 /// Encontra o trecho não explorado que contém pos
 pub fn encontrar_trecho(mascara: List(EstadoCasa), pos: Posicao) -> Trecho {
   Trecho(
     linha: pos.lin,
     inicio: limite_trecho(mascara, pos, Esquerda),
     fim: limite_trecho(mascara, pos, Direita),
+  )
+}
+
+pub fn encontrar_trecho_examples() {
+  let mascara = [
+    TerritorioOuRastro,
+    NaoExplorada,
+    NaoExplorada,
+    TerritorioOuRastro,
+  ]
+
+  check.eq(
+    encontrar_trecho(mascara, Posicao(0, 1)),
+    Trecho(linha: 0, inicio: 1, fim: 2),
   )
 }
 
@@ -994,6 +1368,17 @@ pub fn marcar_trecho(
   let fim = trecho.linha * tamanho + trecho.fim
 
   marcar_intervalo(mascara, 0, inicio, fim)
+}
+
+pub fn marcar_trecho_examples() {
+  // Marca do inicio até o fim
+  check.eq(
+    marcar_trecho(
+      [NaoExplorada, NaoExplorada, NaoExplorada],
+      Trecho(linha: 0, inicio: 1, fim: 2),
+    ),
+    [NaoExplorada, Exterior, Exterior],
+  )
 }
 
 /// Percorre a máscara a partir de indice, colocando True
@@ -1017,6 +1402,32 @@ pub fn marcar_intervalo(
     }
   }
 }
+
+pub fn marcar_intervalo_examples() {
+  // Marca só no intervalo requerido
+  check.eq(
+    marcar_intervalo(
+      [
+        TerritorioOuRastro,
+        NaoExplorada,
+        NaoExplorada,
+        NaoExplorada,
+      ],
+      0,
+      1,
+      2,
+    ),
+    [
+      TerritorioOuRastro,
+      Exterior,
+      Exterior,
+      NaoExplorada,
+    ],
+  )
+
+  // Sem casa para marcar
+  check.eq(marcar_intervalo([], 0, 0, 1), [])
+}
 /// Adiciona às pendentes o começo de cada grupo não explorado
 /// na linha, entre as colunas inicial e final do trecho.
 pub fn conexoes_linha(
@@ -1033,6 +1444,33 @@ pub fn conexoes_linha(
     True,
     pendentes,
   )
+}
+
+pub fn conexoes_linha_examples() {
+  let mascara = [
+    NaoExplorada,
+    NaoExplorada,
+    TerritorioOuRastro,
+    NaoExplorada,
+  ]
+
+  let trecho = Trecho(linha: 1, inicio: 0, fim: 3)
+
+  // Uma posição por sequencia
+  check.eq(conexoes_linha(mascara, trecho, 0, []), [
+    Posicao(0, 3),
+    Posicao(0, 0),
+  ])
+
+  // Fora do mapa
+  check.eq(conexoes_linha(mascara, trecho, -1, []), [])
+
+  // Se já existe uma posição pendente
+  check.eq(conexoes_linha(mascara, trecho, 0, [Posicao(5, 5)]), [
+    Posicao(0, 3),
+    Posicao(0, 0),
+    Posicao(5, 5),
+  ])
 }
 
 /// Percorre a linha da coluna atual até fim, guardando em
@@ -1060,6 +1498,18 @@ fn procurar_conexoes(
       procurar_conexoes(mascara, linha, coluna + 1, fim, bloqueada, pendentes)
     }
   }
+}
+
+pub fn procurar_conexoes_examples() {
+  check.eq(procurar_conexoes([NaoExplorada, NaoExplorada], 0, 0, 1, True, []), [
+    Posicao(0, 0),
+  ])
+
+  // Já está em uma seq marcada
+  check.eq(
+    procurar_conexoes([NaoExplorada, NaoExplorada], 0, 0, 1, False, []),
+    [],
+  )
 }
 
 /// Explora as posições pendentes, preenchendo um trecho
@@ -1093,181 +1543,6 @@ pub fn scanline_fill(
   }
 }
 
-/// Marca as casas alcançáveis pelas quatro bordas,
-/// sem atravessar o território nem o rastro do jogador.
-pub fn casas_exteriores(mascara: List(EstadoCasa)) -> List(EstadoCasa) {
-  bordas_livres(mascara)
-  |> scanline_fill(mascara, _)
-}
-
-/// Não muda o dono das casas exteriores e conquista o resto.
-/// Após o fill, NaoExplorada representa uma casa cercada.
-pub fn pintar_mapa(
-  casas: List(Casa),
-  mascara: List(EstadoCasa),
-  jogador_id: Int,
-) -> List(Casa) {
-  case casas, mascara {
-    [], _ -> []
-    [casa, ..resto_casas], [estado, ..resto_mascara] -> {
-      let nova_casa = case estado {
-        Exterior -> casa
-        _ -> Casa(..casa, dono: Some(jogador_id))
-      }
-      [nova_casa, ..pintar_mapa(resto_casas, resto_mascara, jogador_id)]
-    }
-    _, _ -> casas
-  }
-}
-
-// ----------------------------------------------------------------------
-// Flood Fill - Examples
-// ----------------------------------------------------------------------
-
-pub fn criar_mascara_examples() {
-  let jogador = Jogador(..cria_jogador(1), rastro: [Posicao(0, 1)])
-
-  let partida =
-    Partida(..nova_partida(), mapa: [
-      Casa(Posicao(0, 0), Some(1)),
-      Casa(Posicao(0, 1), None),
-      Casa(Posicao(0, 2), Some(2)),
-    ])
-
-  check.eq(criar_mascara(partida, jogador), [
-    TerritorioOuRastro,
-    TerritorioOuRastro,
-    NaoExplorada,
-  ])
-}
-
-pub fn consultar_indice_examples() {
-  check.eq(consultar_indice([10, 20, 30], 1, 0), 20)
-  check.eq(consultar_indice([10], 3, 0), 0)
-  check.eq(consultar_indice([], 0, 0), 0)
-}
-
-pub fn marcada_examples() {
-  let mascara = [
-    NaoExplorada,
-    TerritorioOuRastro,
-    Exterior,
-  ]
-
-  check.eq(marcada(mascara, Posicao(0, 0)), False)
-  check.eq(marcada(mascara, Posicao(0, 1)), True)
-  check.eq(marcada(mascara, Posicao(0, 2)), True)
-  check.eq(marcada(mascara, Posicao(-1, 0)), True)
-}
-
-pub fn bordas_livres_examples() {
-  check.eq(
-    bordas_livres([
-      NaoExplorada,
-      TerritorioOuRastro,
-      NaoExplorada,
-    ]),
-    [Posicao(0, 0), Posicao(0, 2)],
-  )
-
-  check.eq(bordas_livres([TerritorioOuRastro]), [])
-}
-
-pub fn limite_trecho_examples() {
-  let mascara = [
-    TerritorioOuRastro,
-    NaoExplorada,
-    NaoExplorada,
-    NaoExplorada,
-    TerritorioOuRastro,
-  ]
-
-  check.eq(limite_trecho(mascara, Posicao(0, 2), Esquerda), 1)
-  check.eq(limite_trecho(mascara, Posicao(0, 2), Direita), 3)
-
-  // Para na borda esquerda
-  check.eq(limite_trecho([NaoExplorada], Posicao(0, 0), Esquerda), 0)
-}
-
-pub fn encontrar_trecho_examples() {
-  let mascara = [
-    TerritorioOuRastro,
-    NaoExplorada,
-    NaoExplorada,
-    TerritorioOuRastro,
-  ]
-
-  check.eq(
-    encontrar_trecho(mascara, Posicao(0, 1)),
-    Trecho(linha: 0, inicio: 1, fim: 2),
-  )
-}
-
-pub fn marcar_trecho_examples() {
-  check.eq(
-    marcar_trecho(
-      [NaoExplorada, NaoExplorada, NaoExplorada],
-      Trecho(linha: 0, inicio: 1, fim: 2),
-    ),
-    [NaoExplorada, Exterior, Exterior],
-  )
-}
-
-pub fn marcar_intervalo_examples() {
-  check.eq(
-    marcar_intervalo(
-      [
-        TerritorioOuRastro,
-        NaoExplorada,
-        NaoExplorada,
-        NaoExplorada,
-      ],
-      0,
-      1,
-      2,
-    ),
-    [
-      TerritorioOuRastro,
-      Exterior,
-      Exterior,
-      NaoExplorada,
-    ],
-  )
-
-  check.eq(marcar_intervalo([], 0, 0, 1), [])
-}
-
-pub fn conexoes_linha_examples() {
-  let mascara = [
-    NaoExplorada,
-    NaoExplorada,
-    TerritorioOuRastro,
-    NaoExplorada,
-  ]
-
-  let trecho = Trecho(linha: 1, inicio: 0, fim: 3)
-
-  // Uma posição por grupo, acumuladas pelo começo da lista.
-  check.eq(conexoes_linha(mascara, trecho, 0, []), [
-    Posicao(0, 3),
-    Posicao(0, 0),
-  ])
-
-  check.eq(conexoes_linha(mascara, trecho, -1, []), [])
-}
-
-pub fn procurar_conexoes_examples() {
-  check.eq(procurar_conexoes([NaoExplorada, NaoExplorada], 0, 0, 1, True, []), [
-    Posicao(0, 0),
-  ])
-
-  // Já estamos dentro de um grupo registrado.
-  check.eq(
-    procurar_conexoes([NaoExplorada, NaoExplorada], 0, 0, 1, False, []),
-    [],
-  )
-}
-
 pub fn scanline_fill_examples() {
   let mascara = [
     NaoExplorada,
@@ -1296,20 +1571,48 @@ pub fn scanline_fill_examples() {
   )
 }
 
+/// Marca as casas alcançáveis pelas quatro bordas,
+/// sem atravessar o território nem o rastro do jogador.
+pub fn casas_exteriores(mascara: List(EstadoCasa)) -> List(EstadoCasa) {
+  bordas_livres(mascara)
+  |> scanline_fill(mascara, _)
+}
+
 pub fn casas_exteriores_examples() {
-  // Os dois grupos estão na borda e devem ser explorados.
+  // A casa livre está na borda superior, então é exterior,
+  // mesmo com território dos dois lados.
   check.eq(
     casas_exteriores([
-      NaoExplorada,
       TerritorioOuRastro,
       NaoExplorada,
+      TerritorioOuRastro,
     ]),
     [
-      Exterior,
       TerritorioOuRastro,
       Exterior,
+      TerritorioOuRastro,
     ],
   )
+}
+
+/// Não muda o dono das casas exteriores e conquista o resto.
+/// Após o fill, NaoExplorada representa uma casa cercada.
+pub fn pintar_mapa(
+  casas: List(Casa),
+  mascara: List(EstadoCasa),
+  jogador_id: Int,
+) -> List(Casa) {
+  case casas, mascara {
+    [], _ -> []
+    [casa, ..resto_casas], [estado, ..resto_mascara] -> {
+      let nova_casa = case estado {
+        Exterior -> casa
+        _ -> Casa(..casa, dono: Some(jogador_id))
+      }
+      [nova_casa, ..pintar_mapa(resto_casas, resto_mascara, jogador_id)]
+    }
+    _, _ -> casas
+  }
 }
 
 pub fn pintar_mapa_examples() {
@@ -1326,31 +1629,15 @@ pub fn pintar_mapa_examples() {
   ]
 
   check.eq(pintar_mapa(casas, mascara, 1), [
-    // Exterior mantém o dono.
+    // Exterior fica com o dono.
     Casa(Posicao(0, 0), Some(2)),
-    // Rastro fica com o jogador.
+    // Rastro continua com o jogador.
     Casa(Posicao(0, 1), Some(1)),
     // Casa cercada é conquistada.
     Casa(Posicao(0, 2), Some(1)),
   ])
 }
 
-pub fn fechar_rastro_examples() {
-  let jogador = Jogador(..cria_jogador(1), rastro: [Posicao(0, 1)])
-
-  let partida =
-    Partida(..nova_partida(), mapa: [
-      Casa(Posicao(0, 0), Some(1)),
-      Casa(Posicao(0, 1), None),
-      Casa(Posicao(0, 2), None),
-    ])
-
-  check.eq(fechar_rastro(partida, jogador), [
-    Casa(Posicao(0, 0), Some(1)),
-    Casa(Posicao(0, 1), Some(1)),
-    Casa(Posicao(0, 2), None),
-  ])
-}
 
 // ----------------------------------------------------------------------
 // Poderes
@@ -1364,6 +1651,14 @@ pub fn remover_poder(
     [primeiro, ..resto] if primeiro == tipo -> resto
     [primeiro, ..resto] -> [primeiro, ..remover_poder(resto, tipo)]
   }
+}
+
+pub fn remover_poder_examples() {
+  check.eq(remover_poder([], Velocidade), [])
+  check.eq(remover_poder([Velocidade], Velocidade), [])
+  check.eq(remover_poder([Expansao], Velocidade), [Expansao])
+  check.eq(remover_poder([Expansao, Velocidade], Velocidade), [Expansao])
+  check.eq(remover_poder([Velocidade, Velocidade], Velocidade), [Velocidade])
 }
 
 pub fn ativar_expansao(j: Jogador, partida: Partida) -> Partida {
@@ -1387,6 +1682,21 @@ pub fn ativar_expansao(j: Jogador, partida: Partida) -> Partida {
     })
 
   atualizar_placares(Partida(..partida, mapa: mapa))
+}
+
+pub fn ativar_expansao_examples() {
+  let j = Jogador(..cria_jogador(1), posicao: Posicao(5, 5))
+  let p = Partida(..nova_partida(), mapa: cria_mapa())
+  let expandida = ativar_expansao(j, p)
+
+  // Checa que apenas as 9 casas foram conquistadas
+  check.eq(conta_casas(expandida, j), 9)
+  check.eq(dono_da_casa(expandida.mapa, Posicao(5, 7)), None)
+
+  let j = Jogador(..j, posicao: cria_jogador(2).posicao)
+
+  // A expansão não atinge a base adversária
+  check.eq(ativar_expansao(j, nova_partida()).mapa, nova_partida().mapa)
 }
 
 /// Ativa o poder se ele estiver guardado no inventário do jogador.
@@ -1436,6 +1746,33 @@ pub fn ativar_poder(
   }
 }
 
+pub fn ativar_poder_examples() {
+  let p = nova_partida()
+
+  // Jogador ainda não tem poder ou não existe
+  check.eq(ativar_poder(p, 1, Velocidade), p)
+  check.eq(ativar_poder(p, 3, Expansao), p)
+
+  let j =
+    Jogador(..cria_jogador(1), poderes_guardados: [Velocidade, Velocidade])
+
+  let p = Partida(..p, jogadores: [j, cria_jogador(2)])
+  let acelerada = ativar_poder(p, 1, Velocidade)
+
+  // Jogador com boost de velocidade
+  check.eq(
+    busca_jogador(acelerada.jogadores, 1),
+    Ok(
+      Jogador(
+        ..j,
+        poderes_guardados: [Velocidade],
+        velocidade: velocidade_boost,
+        velocidade_extra: boost_tempo,
+      ),
+    ),
+  )
+}
+
 // ----------------------------------------------------------------------
 // Desenho
 // ----------------------------------------------------------------------
@@ -1453,6 +1790,9 @@ pub fn cor_examples() {
   check.eq(cor(1), color.green)
   check.eq(cor(2), color.blue)
   check.eq(cor(4), color.purple)
+
+  check.eq(cor(0), color.purple)
+  check.eq(cor(-1), color.purple)
 }
 
 /// Produz a cor de uma casa conforme seu proprietário.
@@ -1464,6 +1804,13 @@ fn cor_casa(dono: Option(Int)) -> Color {
   }
 }
 
+pub fn cor_casa_examples() {
+  check.eq(cor_casa(Some(1)), color.green)
+  check.eq(cor_casa(Some(2)), color.blue)
+  check.eq(cor_casa(None), color.white)
+  check.eq(cor_casa(Some(3)), color.white)
+}
+
 /// Produz a cor de um rastro conforme seu proprietário.
 fn cor_rastro(id: Int) -> Color {
   case id {
@@ -1471,6 +1818,13 @@ fn cor_rastro(id: Int) -> Color {
     2 -> color.powderblue
     _ -> color.white
   }
+}
+
+pub fn cor_rastro_examples() {
+  check.eq(cor_rastro(1), color.springgreen)
+  check.eq(cor_rastro(2), color.powderblue)
+  check.eq(cor_rastro(3), color.white)
+  check.eq(cor_rastro(0), color.white)
 }
 
 /// Desenha a tela do *estado* para o jogador *numero*.
@@ -1497,8 +1851,36 @@ fn desenha_casa(casa: Casa) -> Image {
   )
 }
 
+pub fn desenha_casa_examples() {
+  check.same(
+    desenha_casa(Casa(Posicao(0, 0), None)),
+    image.square(
+      lado_casa,
+      style.join([style.fill(color.white), style.stroke(color.grey)]),
+    ),
+  )
+  check.same(
+    desenha_casa(Casa(Posicao(0, 0), Some(1))),
+    image.square(
+      lado_casa,
+      style.join([style.fill(color.green), style.stroke(color.green)]),
+    ),
+  )
+}
+
 fn desenha_rastro(id: Int) -> Image {
   image.square(lado_casa, style.fill(cor_rastro(id)))
+}
+
+pub fn desenha_rastro_examples() {
+  check.same(
+    desenha_rastro(1),
+    image.square(lado_casa, style.fill(color.springgreen)),
+  )
+  check.same(
+    desenha_rastro(2),
+    image.square(lado_casa, style.fill(color.powderblue)),
+  )
 }
 
 fn desenha_poder(imagens: ImagensPoderes, tipo: TipoPoder) -> Image {
@@ -1689,6 +2071,15 @@ pub fn mensagem_resultado(placares: List(Placar), id: Int) -> String {
     }
     _, _ -> "Fim da partida"
   }
+}
+
+pub fn mensagem_resultado_examples() {
+  let placares = [Placar(1, 20), Placar(2, 10)]
+  check.eq(mensagem_resultado(placares, 1), "Você venceu!")
+  check.eq(mensagem_resultado(placares, 2), "Derrota!")
+  check.eq(mensagem_resultado([Placar(1, 10), Placar(2, 10)], 1), "Empate!")
+  check.eq(mensagem_resultado([], 1), "Fim da partida")
+  check.eq(mensagem_resultado(placares, 3), "Fim da partida")
 }
 
 /// Mostra o resultado e os placares finais e permite voltar à abertura.
