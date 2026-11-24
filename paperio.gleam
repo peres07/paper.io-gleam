@@ -190,6 +190,32 @@ pub type Estado {
 }
 
 // ----------------------------------------------------------------------
+// Funções auxiliares
+// ----------------------------------------------------------------------
+
+/// Aplica a função *f* apenas ao jogador com *id* igual a *jogador_id*.
+fn atualiza_jogador(
+  jogadores: List(Jogador),
+  jogador_id: Int,
+  f: fn(Jogador) -> Jogador,
+) -> List(Jogador) {
+  list.map(jogadores, fn(j) {
+    case j.id == jogador_id {
+      True -> f(j)
+      False -> j
+    }
+  })
+}
+
+/// Procura um jogador na lista pelo seu *id*.
+fn busca_jogador(
+  jogadores: List(Jogador),
+  jogador_id: Int,
+) -> Result(Jogador, Nil) {
+  list.find(jogadores, fn(j) { j.id == jogador_id })
+}
+
+// ----------------------------------------------------------------------
 // Mundo
 // ----------------------------------------------------------------------
 
@@ -387,8 +413,8 @@ fn guardar_direcao(
   nova_direcao: Direcao,
 ) -> Partida {
   let jogadores =
-    list.map(partida.jogadores, fn(j) {
-      case j.id == jogador_id && j.reaparecimento == 0 {
+    atualiza_jogador(partida.jogadores, jogador_id, fn(j) {
+      case j.reaparecimento == 0 {
         True -> {
           let pode_mudar = case j.direcoes {
             [direcao_atual, ..] -> !sao_opostas(direcao_atual, nova_direcao)
@@ -765,14 +791,10 @@ pub fn dono_da_casa_examples() {
 /// Move o jogador na direção escolhida. Se ele estiver esperando
 /// para reaparecer, mantém a partida sem alterações.
 pub fn move(partida: Partida, jogador_id: Int, direcao: Direcao) -> Partida {
-  let jogador =
-    list.find(partida.jogadores, fn(j) {
-      j.id == jogador_id && j.reaparecimento == 0
-    })
   let adversario = list.find(partida.jogadores, fn(j) { j.id != jogador_id })
 
-  case jogador, adversario {
-    Ok(jogador), Ok(adversario) ->
+  case busca_jogador(partida.jogadores, jogador_id), adversario {
+    Ok(jogador), Ok(adversario) if jogador.reaparecimento == 0 ->
       mover_jogador(partida, jogador, direcao, adversario)
     _, _ -> partida
   }
@@ -904,12 +926,10 @@ pub fn mover_jogador(
   }
 
   let jogadores =
-    list.map(partida.jogadores, fn(j) {
-      case j.id == jogador.id {
-        True -> jogador_atualizado2
-        False -> novo_adversario
-      }
+    atualiza_jogador(partida.jogadores, jogador.id, fn(_) {
+      jogador_atualizado2
     })
+    |> atualiza_jogador(adversario.id, fn(_) { novo_adversario })
 
   let atualizada =
     Partida(..partida, mapa: mapa, jogadores: jogadores, poderes: poderes)
@@ -973,14 +993,13 @@ pub type EstadoCasa {
 
 /// Devolve as posições vizinhas que ficam dentro do mapa.
 pub fn casas_vizinhas(pos: Posicao) -> List(Posicao) {
-  let candidatas = [
+  [
     Posicao(pos.lin - 1, pos.col),
     Posicao(pos.lin + 1, pos.col),
     Posicao(pos.lin, pos.col - 1),
     Posicao(pos.lin, pos.col + 1),
   ]
-
-  list.filter(candidatas, dentro_do_mapa)
+  |> list.filter(dentro_do_mapa)
 }
 
 /// Cria a máscara na mesma ordem das casas do mapa.
@@ -1184,8 +1203,8 @@ pub fn scanline_fill(
 /// Marca as casas alcançáveis pelas quatro bordas,
 /// sem atravessar o território nem o rastro do jogador.
 pub fn casas_exteriores(mascara: List(EstadoCasa)) -> List(EstadoCasa) {
-  let bordas = bordas_livres(mascara)
-  scanline_fill(mascara, bordas)
+  bordas_livres(mascara)
+  |> scanline_fill(mascara, _)
 }
 
 /// Não muda o dono das casas exteriores e conquista o resto.
@@ -1469,9 +1488,7 @@ pub fn remover_poder(
 }
 
 pub fn tem_poder(partida: Partida, jogador_id: Int, tipo: TipoPoder) -> Bool {
-  let jogador = list.find(partida.jogadores, fn(j) { j.id == jogador_id })
-
-  case jogador {
+  case busca_jogador(partida.jogadores, jogador_id) {
     Ok(j) -> list.contains(j.poderes_guardados, tipo)
     Error(_) -> False
   }
@@ -1512,20 +1529,13 @@ pub fn ativar_poder(
   let atualizada = case tipo {
     Velocidade -> {
       let jogadores =
-        list.map(partida.jogadores, fn(j) {
-          case j.id == jogador_id {
-            True -> aumentar_velocidade(j)
-            False -> j
-          }
-        })
+        atualiza_jogador(partida.jogadores, jogador_id, aumentar_velocidade)
 
       Partida(..partida, jogadores: jogadores)
     }
 
     Expansao -> {
-      let jogador = list.find(partida.jogadores, fn(j) { j.id == jogador_id })
-
-      case jogador {
+      case busca_jogador(partida.jogadores, jogador_id) {
         Ok(j) -> ativar_expansao(j, partida)
         Error(_) -> partida
       }
@@ -1533,15 +1543,8 @@ pub fn ativar_poder(
   }
 
   let jogadores =
-    list.map(atualizada.jogadores, fn(j) {
-      case j.id == jogador_id {
-        True ->
-          Jogador(
-            ..j,
-            poderes_guardados: remover_poder(j.poderes_guardados, tipo),
-          )
-        False -> j
-      }
+    atualiza_jogador(atualizada.jogadores, jogador_id, fn(j) {
+      Jogador(..j, poderes_guardados: remover_poder(j.poderes_guardados, tipo))
     })
 
   Partida(..atualizada, jogadores: jogadores)
@@ -1642,35 +1645,27 @@ fn desenha_jogador(j: Jogador) -> Image {
 
 /// Produz a imagem do mapa com suas casas e jogadores.
 pub fn grade(partida: Partida, imagens_poderes: ImagensPoderes) -> Image {
-  let fundo =
-    image.rectangle(
-      tamanho * lado_casa,
-      tamanho * lado_casa,
-      style.fill(color.white),
+  image.rectangle(
+    tamanho * lado_casa,
+    tamanho * lado_casa,
+    style.fill(color.white),
+  )
+  |> list.fold(partida.mapa, _, fn(cena, casa) {
+    coloca_img(cena, casa.posicao, desenha_casa(casa))
+  })
+  |> list.fold(partida.jogadores, _, fn(cena, j) {
+    list.fold(j.rastro, cena, fn(imagem, pos) {
+      coloca_img(imagem, pos, desenha_rastro(j.id))
+    })
+  })
+  |> list.fold(partida.poderes, _, fn(imagem, poder) {
+    coloca_img(
+      imagem,
+      poder.posicao,
+      desenha_poder(imagens_poderes, poder.tipo),
     )
-
-  let com_casas =
-    list.fold(partida.mapa, fundo, fn(cena, casa) {
-      coloca_img(cena, casa.posicao, desenha_casa(casa))
-    })
-
-  let com_rastro =
-    list.fold(partida.jogadores, com_casas, fn(cena, j) {
-      list.fold(j.rastro, cena, fn(imagem, pos) {
-        coloca_img(imagem, pos, desenha_rastro(j.id))
-      })
-    })
-
-  let com_poder =
-    list.fold(partida.poderes, com_rastro, fn(imagem, poder) {
-      coloca_img(
-        imagem,
-        poder.posicao,
-        desenha_poder(imagens_poderes, poder.tipo),
-      )
-    })
-
-  list.fold(partida.jogadores, com_poder, fn(cena, j) {
+  })
+  |> list.fold(partida.jogadores, _, fn(cena, j) {
     case j.reaparecimento == 0 {
       True -> coloca_img(cena, j.posicao, desenha_jogador(j))
       False -> cena
@@ -1706,7 +1701,7 @@ pub fn tela_partida(
   let segundos =
     { duracao - partida.tiques + tiques_por_segundo - 1 } / tiques_por_segundo
 
-  let poderes = case list.find(partida.jogadores, fn(j) { j.id == id }) {
+  let poderes = case busca_jogador(partida.jogadores, id) {
     Ok(j) -> {
       case j.poderes_guardados {
         [] -> image.empty
