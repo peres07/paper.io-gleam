@@ -668,14 +668,14 @@ pub fn dentro_do_mapa_examples() {
   check.eq(dentro_do_mapa(Posicao(20, 5)), False)
 }
 
-/// Retorna a posição resultante após uma movimentação, ficando na mesma
-/// posição caso o deslocamento saia do mapa
+/// Calcula o destino, bloqueando as bordas, a base adversária e
+/// um adversário ativo. None indica que ele está fora de jogo.
 pub fn desloca(
   pos: Posicao,
   dir: Direcao,
   rastro: List(Posicao),
   base_adversario: List(Posicao),
-  adversario_pos: Posicao,
+  adversario_pos: Option(Posicao),
 ) -> Posicao {
   let destino = case dir {
     Cima -> Posicao(pos.lin - 1, pos.col)
@@ -687,7 +687,7 @@ pub fn desloca(
   case
     dentro_do_mapa(destino),
     contem_posicao(destino, base_adversario),
-    destino == adversario_pos
+    Some(destino) == adversario_pos
   {
     True, False, False -> destino
     _, _, _ -> pos
@@ -696,7 +696,7 @@ pub fn desloca(
 
 pub fn desloca_examples() {
   let pos = Posicao(5, 5)
-  let adversario_distante = Posicao(12, 12)
+  let adversario_distante = Some(Posicao(12, 12))
 
   // Movimentação sem rastro.
   check.eq(desloca(pos, Cima, [], [], adversario_distante), Posicao(4, 5))
@@ -765,7 +765,7 @@ pub fn desloca_examples() {
   )
 
   // Movimento bloqueado quando o adversário ocupa o destino.
-  check.eq(desloca(pos, Direita, [], [], Posicao(5, 6)), pos)
+  check.eq(desloca(pos, Direita, [], [], Some(Posicao(5, 6))), pos)
 }
 
 /// Devolve o dono da casa na posição pos.
@@ -863,13 +863,18 @@ pub fn mover_jogador(
   direcao: Direcao,
   adversario: Jogador,
 ) -> Partida {
+  let adversario_pos = case adversario.reaparecimento == 0 {
+    True -> Some(adversario.posicao)
+    False -> None
+  }
+
   let nova_pos =
     desloca(
       jogador.posicao,
       direcao,
       jogador.rastro,
       adversario.base,
-      adversario.posicao,
+      adversario_pos,
     )
 
   let moveu = nova_pos != jogador.posicao
