@@ -37,8 +37,8 @@
 // - Tecla 1: utiliza um poder de expansão armazenado.
 // - Tecla 2: utiliza um poder de velocidade armazenado.
 
-import gleam/int
 import gleam/float
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -84,7 +84,7 @@ const velocidade_boost = 3.0
 const boost_tempo = 40
 
 /// Delay poder - 80 ticks
-const delay_poder = 80
+const delay_poder = 20
 
 // ----------------------------------------------------------------------
 // Tipos de dados
@@ -371,16 +371,35 @@ pub fn nova_partida_examples() {
 // Teclas
 // ----------------------------------------------------------------------
 
+/// Verifica se duas direções são opostas entre si.
+pub fn sao_opostas(dir1: Direcao, dir2: Direcao) -> Bool {
+  case dir1, dir2 {
+    Cima, Baixo | Baixo, Cima -> True
+    Esquerda, Direita | Direita, Esquerda -> True
+    _, _ -> False
+  }
+}
+
 /// Troca a direção do jogador correspondente
 fn guardar_direcao(
   partida: Partida,
   jogador_id: Int,
-  direcao: Direcao,
+  nova_direcao: Direcao,
 ) -> Partida {
   let jogadores =
     list.map(partida.jogadores, fn(j) {
       case j.id == jogador_id && j.reaparecimento == 0 {
-        True -> Jogador(..j, direcoes: [direcao])
+        True -> {
+          let pode_mudar = case j.direcoes {
+            [direcao_atual, ..] -> !sao_opostas(direcao_atual, nova_direcao)
+            [] -> True
+          }
+
+          case pode_mudar {
+            True -> Jogador(..j, direcoes: [nova_direcao])
+            False -> j
+          }
+        }
         False -> j
       }
     })
@@ -450,18 +469,14 @@ pub fn ocupada(jogadores: List(Jogador), pos: Posicao) -> Bool {
 /// Produz a lista de posições do mapa da *partida* que não tem
 /// nem jogador, nem poder
 pub fn casas_livres(partida: Partida) -> List(Posicao) {
-  let posicoes_poderes = list.map(partida.poderes, fn(poder) {
-    poder.posicao
-  })
+  let posicoes_poderes = list.map(partida.poderes, fn(poder) { poder.posicao })
 
   list.filter(todas_as_casas(), fn(casa) {
     !list.contains(posicoes_poderes, casa) && !ocupada(partida.jogadores, casa)
   })
 }
 
-pub fn sorteia_tipo(
-  gerador: Generator,
-) -> #(TipoPoder, Generator) {
+pub fn sorteia_tipo(gerador: Generator) -> #(TipoPoder, Generator) {
   let tipos = [Velocidade, Expansao]
 
   case random.pick(gerador, tipos) {
@@ -484,8 +499,7 @@ pub fn sorteia_poder(
       #([poder, ..partida.poderes], gerador)
     }
 
-    #(Error(_), gerador) ->
-      #(partida.poderes, gerador)
+    #(Error(_), gerador) -> #(partida.poderes, gerador)
   }
 }
 
@@ -507,7 +521,8 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
 
       let atualizada = Partida(..partida, tiques: tiques, jogadores: jogadores)
       let intervalo_movimento = int.max(1, float.round(6.0 /. velocidade_cobra))
-      let intervalo_movimento_boost = int.max(1, float.round(6.0 /. velocidade_boost))
+      let intervalo_movimento_boost =
+        int.max(1, float.round(6.0 /. velocidade_boost))
 
       let movimentada =
         list.fold(jogadores, atualizada, fn(acumulado, jogador) {
@@ -526,50 +541,43 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
           }
         })
 
-        let jogadores =
-          list.map(movimentada.jogadores, fn(j) {
-            case j.velocidade_extra > 0 {
-              True -> {
-                let restante = j.velocidade_extra - 1
+      let jogadores =
+        list.map(movimentada.jogadores, fn(j) {
+          case j.velocidade_extra > 0 {
+            True -> {
+              let restante = j.velocidade_extra - 1
 
-                case restante == 0 {
-                  True ->
-                    Jogador(
-                      ..j,
-                      velocidade_extra: 0,
-                      velocidade: velocidade_cobra,
-                    )
+              case restante == 0 {
+                True ->
+                  Jogador(
+                    ..j,
+                    velocidade_extra: 0,
+                    velocidade: velocidade_cobra,
+                  )
 
-                  False ->
-                    Jogador(..j, velocidade_extra: restante)
-                }
+                False -> Jogador(..j, velocidade_extra: restante)
               }
-
-              False -> j
             }
-          })
 
-        let movimentada = Partida(..movimentada, jogadores: jogadores)
+            False -> j
+          }
+        })
 
+      let movimentada = Partida(..movimentada, jogadores: jogadores)
 
       case movimentada.proximo_poder <= 1 {
         True -> {
           let #(poderes, novo_gerador) = sorteia_poder(gerador, movimentada)
 
-          let atualizada = Partida(
-            ..movimentada,
-            poderes: poderes,
-            proximo_poder: delay_poder,
-          )
+          let atualizada =
+            Partida(..movimentada, poderes: poderes, proximo_poder: delay_poder)
 
           EmPartida(novo_gerador, imagens, atualizada)
         }
 
         False -> {
-          let atualizada = Partida(
-            ..movimentada,
-            proximo_poder: movimentada.proximo_poder - 1,
-          )
+          let atualizada =
+            Partida(..movimentada, proximo_poder: movimentada.proximo_poder - 1)
 
           EmPartida(gerador, imagens, atualizada)
         }
@@ -856,28 +864,23 @@ pub fn mover_jogador(
   let fechou_rastro = moveu && voltou_area && jogador.rastro != []
 
   let poder = case moveu {
-    True -> list.find(partida.poderes, fn(p) {
-      p.posicao == nova_pos
-    })
+    True -> list.find(partida.poderes, fn(p) { p.posicao == nova_pos })
     False -> Error(Nil)
   }
 
-  let jogador_atualizado1 =
-    case poder {
-      Ok(p) -> {
-        Jogador(
-          ..jogador,
-          poderes_guardados: [p.tipo, ..jogador.poderes_guardados],
-        )
-      }
-      Error(_) -> jogador
+  let jogador_atualizado1 = case poder {
+    Ok(p) -> {
+      Jogador(..jogador, poderes_guardados: [
+        p.tipo,
+        ..jogador.poderes_guardados
+      ])
     }
+    Error(_) -> jogador
+  }
 
   let poderes = case poder {
     Ok(p) ->
-      list.filter(partida.poderes, fn(outro) {
-        outro.posicao != p.posicao
-      })
+      list.filter(partida.poderes, fn(outro) { outro.posicao != p.posicao })
 
     Error(_) -> partida.poderes
   }
@@ -908,12 +911,8 @@ pub fn mover_jogador(
       }
     })
 
-    let atualizada = Partida(
-      ..partida,
-      mapa: mapa,
-      jogadores: jogadores,
-      poderes: poderes,
-    )
+  let atualizada =
+    Partida(..partida, mapa: mapa, jogadores: jogadores, poderes: poderes)
 
   case fechou_rastro {
     True -> atualizar_placares(atualizada)
@@ -1458,7 +1457,10 @@ pub fn fechar_rastro_examples() {
 // ----------------------------------------------------------------------
 // Poderes
 // ----------------------------------------------------------------------
-pub fn remover_poder(poderes: List(TipoPoder), tipo: TipoPoder) -> List(TipoPoder) {
+pub fn remover_poder(
+  poderes: List(TipoPoder),
+  tipo: TipoPoder,
+) -> List(TipoPoder) {
   case poderes {
     [] -> []
     [primeiro, ..resto] if primeiro == tipo -> resto
@@ -1467,9 +1469,7 @@ pub fn remover_poder(poderes: List(TipoPoder), tipo: TipoPoder) -> List(TipoPode
 }
 
 pub fn tem_poder(partida: Partida, jogador_id: Int, tipo: TipoPoder) -> Bool {
-  let jogador = list.find(partida.jogadores, fn(j) {
-    j.id == jogador_id
-  })
+  let jogador = list.find(partida.jogadores, fn(j) { j.id == jogador_id })
 
   case jogador {
     Ok(j) -> list.contains(j.poderes_guardados, tipo)
@@ -1478,30 +1478,28 @@ pub fn tem_poder(partida: Partida, jogador_id: Int, tipo: TipoPoder) -> Bool {
 }
 
 pub fn aumentar_velocidade(j: Jogador) -> Jogador {
-  Jogador(
-    ..j,
-    velocidade: velocidade_boost,
-    velocidade_extra: boost_tempo,
-  )
+  Jogador(..j, velocidade: velocidade_boost, velocidade_extra: boost_tempo)
 }
 
 pub fn ativar_expansao(j: Jogador, partida: Partida) -> Partida {
-  let mapa = list.map(partida.mapa, fn(casa) {
-    let perto =
-      casa.posicao.lin >= j.posicao.lin - 1 &&
-      casa.posicao.lin <= j.posicao.lin + 1 &&
-      casa.posicao.col >= j.posicao.col - 1 &&
-      casa.posicao.col <= j.posicao.col + 1
+  let mapa =
+    list.map(partida.mapa, fn(casa) {
+      let perto =
+        casa.posicao.lin >= j.posicao.lin - 1
+        && casa.posicao.lin <= j.posicao.lin + 1
+        && casa.posicao.col >= j.posicao.col - 1
+        && casa.posicao.col <= j.posicao.col + 1
 
-    let base_adversaria = list.any(partida.jogadores, fn(outro) {
-      outro.id != j.id && contem_posicao(casa.posicao, outro.base)
+      let base_adversaria =
+        list.any(partida.jogadores, fn(outro) {
+          outro.id != j.id && contem_posicao(casa.posicao, outro.base)
+        })
+
+      case perto && !base_adversaria {
+        True -> Casa(..casa, dono: Some(j.id))
+        False -> casa
+      }
     })
-
-    case perto && !base_adversaria {
-      True -> Casa(..casa, dono: Some(j.id))
-      False -> casa
-    }
-  })
 
   atualizar_placares(Partida(..partida, mapa: mapa))
 }
@@ -1513,20 +1511,19 @@ pub fn ativar_poder(
 ) -> Partida {
   let atualizada = case tipo {
     Velocidade -> {
-      let jogadores = list.map(partida.jogadores, fn(j) {
-        case j.id == jogador_id {
-          True -> aumentar_velocidade(j)
-          False -> j
-        }
-      })
+      let jogadores =
+        list.map(partida.jogadores, fn(j) {
+          case j.id == jogador_id {
+            True -> aumentar_velocidade(j)
+            False -> j
+          }
+        })
 
       Partida(..partida, jogadores: jogadores)
     }
 
     Expansao -> {
-      let jogador = list.find(partida.jogadores, fn(j) {
-        j.id == jogador_id
-      })
+      let jogador = list.find(partida.jogadores, fn(j) { j.id == jogador_id })
 
       case jogador {
         Ok(j) -> ativar_expansao(j, partida)
@@ -1535,15 +1532,17 @@ pub fn ativar_poder(
     }
   }
 
-  let jogadores = list.map(atualizada.jogadores, fn(j) {
-    case j.id == jogador_id {
-      True -> Jogador(
-        ..j,
-        poderes_guardados: remover_poder(j.poderes_guardados, tipo),
-      )
-      False -> j
-    }
-  })
+  let jogadores =
+    list.map(atualizada.jogadores, fn(j) {
+      case j.id == jogador_id {
+        True ->
+          Jogador(
+            ..j,
+            poderes_guardados: remover_poder(j.poderes_guardados, tipo),
+          )
+        False -> j
+      }
+    })
 
   Partida(..atualizada, jogadores: jogadores)
 }
@@ -1663,8 +1662,12 @@ pub fn grade(partida: Partida, imagens_poderes: ImagensPoderes) -> Image {
     })
 
   let com_poder =
-      list.fold(partida.poderes, com_rastro, fn(imagem, poder) {
-        coloca_img(imagem, poder.posicao, desenha_poder(imagens_poderes, poder.tipo))
+    list.fold(partida.poderes, com_rastro, fn(imagem, poder) {
+      coloca_img(
+        imagem,
+        poder.posicao,
+        desenha_poder(imagens_poderes, poder.tipo),
+      )
     })
 
   list.fold(partida.jogadores, com_poder, fn(cena, j) {
@@ -1703,39 +1706,36 @@ pub fn tela_partida(
   let segundos =
     { duracao - partida.tiques + tiques_por_segundo - 1 } / tiques_por_segundo
 
-    let poderes =
-    case list.find(partida.jogadores, fn(j) { j.id == id }) {
-      Ok(j) -> {
-        case j.poderes_guardados {
-          [] -> image.empty
+  let poderes = case list.find(partida.jogadores, fn(j) { j.id == id }) {
+    Ok(j) -> {
+      case j.poderes_guardados {
+        [] -> image.empty
 
-          _ -> {
-            let quantidade = list.length(j.poderes_guardados)
+        _ -> {
+          let quantidade = list.length(j.poderes_guardados)
 
-            let texto = image.text(
+          let texto =
+            image.text(
               "Poderes (" <> int.to_string(quantidade) <> "): ",
               18,
               fill.black,
             )
 
-            let icones =
-              list.fold(j.poderes_guardados, image.empty, fn(imagem, tipo) {
-                image.beside(imagem, desenha_poder(imagens_poderes, tipo))
-              })
+          let icones =
+            list.fold(j.poderes_guardados, image.empty, fn(imagem, tipo) {
+              image.beside(imagem, desenha_poder(imagens_poderes, tipo))
+            })
 
-            image.beside(texto, icones)
-          }
+          image.beside(texto, icones)
         }
       }
-
-      Error(_) -> image.empty
     }
 
-    let espaco_poderes =
-      image.overlay(
-        poderes,
-        image.rectangle(largura, 36, fill.white),
-      )
+    Error(_) -> image.empty
+  }
+
+  let espaco_poderes =
+    image.overlay(poderes, image.rectangle(largura, 36, fill.white))
 
   let placar =
     list.fold(partida.placares, image.empty, fn(cena, p) {
