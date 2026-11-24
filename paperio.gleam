@@ -9,7 +9,7 @@
 // - Dois jogadores. Cada jogador começa com uma pequena base própria
 //   em um lado do tabuleiro.
 // - Ao sair do próprio território, o jogador deixa um rastro. Ao retornar
-//   a uma área que já era sua antes de iniciar o caminho, o rastro e as
+//   a qualquer território próprio, inclusive uma ilha criada pela expansão, o rastro e as
 //   casas cercadas são conquistados.
 // - A base inicial de cada jogador é permanente e não pode ser conquistada
 //   pelo adversário. Os demais territórios podem ser conquistados por ambos.
@@ -128,15 +128,13 @@ pub type PoderNoMapa {
 
 /// Um jogador da partida. *id* identifica o jogador, *posicao* indica sua
 /// casa atual, *direcoes* guarda as direções dos movimentos e *rastro*
-/// contém as casas percorridas fora do território. *casas_proprias*
-/// guarda as casas próprias antes do início do rastro.
+/// contém as casas percorridas fora do território.
 pub type Jogador {
   Jogador(
     id: Int,
     posicao: Posicao,
     direcoes: List(Direcao),
     rastro: List(Posicao),
-    casas_proprias: List(Posicao),
     base: List(Posicao),
     // Poderes coletados e ainda não utilizados.
     poderes_guardados: List(TipoPoder),
@@ -329,7 +327,6 @@ pub fn cria_jogador(id: Int) -> Jogador {
     posicao: posicao,
     direcoes: [direcao_inicial(id)],
     rastro: [],
-    casas_proprias: base,
     base: base,
     poderes_guardados: [],
     velocidade_extra: 0,
@@ -814,7 +811,7 @@ pub fn move_examples() {
 }
 
 /// Reinicia o jogador após ser eliminado. Posiciona-o no centro da base,
-/// limpa as direções, o rastro e os poderes guardados e restaura a
+/// restaura a direção inicial, limpa o rastro e os poderes e restaura a
 /// velocidade padrão. Preserva o território conquistado e inicia
 /// a espera de dois segundos para reaparecer.
 pub fn reinicia_jogador(jogador: Jogador) -> Jogador {
@@ -822,7 +819,6 @@ pub fn reinicia_jogador(jogador: Jogador) -> Jogador {
 
   Jogador(
     ..jogador_inicial,
-    casas_proprias: jogador.casas_proprias,
     reaparecimento: 2 * tiques_por_segundo,
   )
 }
@@ -835,7 +831,6 @@ pub fn reinicia_jogador_examples() {
       posicao: Posicao(10, 10),
       direcoes: [Cima],
       rastro: [Posicao(10, 10)],
-      casas_proprias: [Posicao(15, 2), ..inicial.base],
       velocidade_extra: 10,
       velocidade: 7.5,
     )
@@ -843,10 +838,9 @@ pub fn reinicia_jogador_examples() {
   let reiniciado = reinicia_jogador(jogador)
 
   check.eq(reiniciado.id, jogador.id)
-  check.eq(reiniciado.posicao, Posicao(17, 2))
+  check.eq(reiniciado.posicao, inicial.posicao)
   check.eq(reiniciado.base, jogador.base)
-  check.eq(reiniciado.casas_proprias, jogador.casas_proprias)
-  check.eq(reiniciado.direcoes, [])
+  check.eq(reiniciado.direcoes, inicial.direcoes)
   check.eq(reiniciado.rastro, [])
   check.eq(reiniciado.poderes_guardados, [])
   check.eq(reiniciado.velocidade_extra, 0)
@@ -857,7 +851,7 @@ pub fn reinicia_jogador_examples() {
   let reiniciado_2 =
     reinicia_jogador(Jogador(..jogador_2, posicao: Posicao(10, 10)))
 
-  check.eq(reiniciado_2.posicao, Posicao(2, 17))
+  check.eq(reiniciado_2.posicao, jogador_2.posicao)
 }
 
 /// Atualiza a posição e o rastro do jogador.
