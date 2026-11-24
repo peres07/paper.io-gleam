@@ -75,7 +75,7 @@ const largura = 400
 const altura = 520
 
 /// Velocidade da cobra
-const velocidade_cobra = 1.0
+const velocidade_cobra = 2.0
 
 /// Velocidade extra da cobra
 const velocidade_boost = 3.0
@@ -411,10 +411,7 @@ fn guardar_direcao(
 ) -> Partida {
   let jogadores =
     atualiza_jogador(partida.jogadores, jogador_id, fn(j) {
-      case
-        j.reaparecimento == 0
-        && !sao_opostas(j.direcao, nova_direcao)
-      {
+      case j.reaparecimento == 0 && !sao_opostas(j.direcao, nova_direcao) {
         True -> Jogador(..j, direcao: nova_direcao)
         False -> j
       }
@@ -522,16 +519,16 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
         })
 
       let atualizada = Partida(..partida, tiques: tiques, jogadores: jogadores)
-      let intervalo_movimento = int.max(1, float.round(6.0 /. velocidade_cobra))
-      let intervalo_movimento_boost =
-        int.max(1, float.round(6.0 /. velocidade_boost))
-
       let movimentada =
         list.fold(jogadores, atualizada, fn(acumulado, jogador) {
-          let intervalo = case jogador.velocidade_extra > 0 {
-            True -> intervalo_movimento_boost
-            False -> intervalo_movimento
-          }
+          // Converte a velocidade em casas por segundo para tiques por movimento.
+          let intervalo =
+            int.max(
+              1,
+              float.round(
+                int.to_float(tiques_por_segundo) /. jogador.velocidade,
+              ),
+            )
 
           case tiques % intervalo == 0 {
             True -> move(acumulado, jogador.id, jogador.direcao)
@@ -539,27 +536,22 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
           }
         })
 
-      let jogadores =
-        list.map(movimentada.jogadores, fn(j) {
-          case j.velocidade_extra > 0 {
-            True -> {
-              let restante = j.velocidade_extra - 1
+        let jogadores =
+          list.map(movimentada.jogadores, fn(jogador) {
+            case jogador.velocidade_extra {
+              1 ->
+                Jogador(
+                  ..jogador,
+                  velocidade_extra: 0,
+                  velocidade: velocidade_cobra,
+                )
 
-              case restante == 0 {
-                True ->
-                  Jogador(
-                    ..j,
-                    velocidade_extra: 0,
-                    velocidade: velocidade_cobra,
-                  )
+              tempo if tempo > 1 ->
+                Jogador(..jogador, velocidade_extra: tempo - 1)
 
-                False -> Jogador(..j, velocidade_extra: restante)
-              }
+              _ -> jogador
             }
-
-            False -> j
-          }
-        })
+          })
 
       let movimentada = Partida(..movimentada, jogadores: jogadores)
 
@@ -648,7 +640,6 @@ pub fn dentro_do_mapa_examples() {
 pub fn desloca(
   pos: Posicao,
   dir: Direcao,
-  rastro: List(Posicao),
   base_adversario: List(Posicao),
   adversario_pos: Option(Posicao),
 ) -> Posicao {
@@ -673,74 +664,26 @@ pub fn desloca_examples() {
   let pos = Posicao(5, 5)
   let adversario_distante = Some(Posicao(12, 12))
 
-  // Movimentação sem rastro.
-  check.eq(desloca(pos, Cima, [], [], adversario_distante), Posicao(4, 5))
-  check.eq(desloca(pos, Baixo, [], [], adversario_distante), Posicao(6, 5))
-  check.eq(desloca(pos, Esquerda, [], [], adversario_distante), Posicao(5, 4))
-  check.eq(desloca(pos, Direita, [], [], adversario_distante), Posicao(5, 6))
+  // Movimento nas quatro direções.
+  check.eq(desloca(pos, Cima, [], adversario_distante), Posicao(4, 5))
+  check.eq(desloca(pos, Baixo, [], adversario_distante), Posicao(6, 5))
+  check.eq(desloca(pos, Esquerda, [], adversario_distante), Posicao(5, 4))
+  check.eq(desloca(pos, Direita, [], adversario_distante), Posicao(5, 6))
 
-  // Movimentação nas bordas do mapa.
-  let canto_superior = Posicao(0, 0)
-  let canto_inferior = Posicao(19, 19)
+  // Não permite sair do mapa.
+  let superior = Posicao(0, 0)
+  let inferior = Posicao(tamanho - 1, tamanho - 1)
+  check.eq(desloca(superior, Cima, [], None), superior)
+  check.eq(desloca(superior, Esquerda, [], None), superior)
+  check.eq(desloca(inferior, Baixo, [], None), inferior)
+  check.eq(desloca(inferior, Direita, [], None), inferior)
 
-  check.eq(
-    desloca(canto_superior, Cima, [], [], adversario_distante),
-    canto_superior,
-  )
-  check.eq(
-    desloca(canto_superior, Esquerda, [], [], adversario_distante),
-    canto_superior,
-  )
-  check.eq(
-    desloca(canto_inferior, Baixo, [], [], adversario_distante),
-    canto_inferior,
-  )
-  check.eq(
-    desloca(canto_inferior, Direita, [], [], adversario_distante),
-    canto_inferior,
-  )
+  // A base adversária bloqueia mesmo sem adversário ativo.
+  check.eq(desloca(pos, Direita, [Posicao(5, 6)], None), pos)
 
-  // Movimento bloqueado pelo próprio rastro.
-  check.eq(desloca(pos, Cima, [Posicao(4, 5)], [], adversario_distante), pos)
-  check.eq(desloca(pos, Baixo, [Posicao(6, 5)], [], adversario_distante), pos)
-  check.eq(
-    desloca(pos, Esquerda, [Posicao(5, 4)], [], adversario_distante),
-    pos,
-  )
-  check.eq(desloca(pos, Direita, [Posicao(5, 6)], [], adversario_distante), pos)
-
-  // Movimento bloqueado por uma posição no meio do rastro.
-  check.eq(
-    desloca(
-      pos,
-      Direita,
-      [Posicao(3, 3), Posicao(5, 6), Posicao(8, 8)],
-      [],
-      adversario_distante,
-    ),
-    pos,
-  )
-
-  // Movimento permitido quando o destino não pertence ao rastro.
-  check.eq(
-    desloca(
-      pos,
-      Direita,
-      [Posicao(4, 5), Posicao(5, 4), Posicao(6, 5)],
-      [],
-      adversario_distante,
-    ),
-    Posicao(5, 6),
-  )
-
-  // Movimento permitido com rastro distante.
-  check.eq(
-    desloca(pos, Cima, [Posicao(10, 10)], [], adversario_distante),
-    Posicao(4, 5),
-  )
-
-  // Movimento bloqueado quando o adversário ocupa o destino.
-  check.eq(desloca(pos, Direita, [], [], Some(Posicao(5, 6))), pos)
+  // Um adversário ativo bloqueia; um ausente não bloqueia.
+  check.eq(desloca(pos, Direita, [], Some(Posicao(5, 6))), pos)
+  check.eq(desloca(pos, Direita, [], None), Posicao(5, 6))
 }
 
 /// Devolve o dono da casa na posição pos.
@@ -778,8 +721,8 @@ pub fn move_examples() {
   let movida = move(partida, 1, Cima)
 
   check.eq(list.map(movida.jogadores, fn(j) { j.posicao }), [
-    Posicao(16, 2),
-    Posicao(2, 17),
+    Posicao(17, 1),
+    Posicao(1, 18),
   ])
 
   check.eq(move(partida, 3, Cima), partida)
@@ -792,10 +735,7 @@ pub fn move_examples() {
 pub fn reinicia_jogador(jogador: Jogador) -> Jogador {
   let jogador_inicial = cria_jogador(jogador.id)
 
-  Jogador(
-    ..jogador_inicial,
-    reaparecimento: 2 * tiques_por_segundo,
-  )
+  Jogador(..jogador_inicial, reaparecimento: 2 * tiques_por_segundo)
 }
 
 pub fn reinicia_jogador_examples() {
@@ -847,7 +787,6 @@ pub fn mover_jogador(
     desloca(
       jogador.posicao,
       direcao,
-      jogador.rastro,
       adversario.base,
       adversario_pos,
     )
@@ -917,10 +856,9 @@ pub fn mover_jogador(
 /// Conquista o rastro e as casas cercadas ao voltar
 /// ao território do jogador.
 pub fn fechar_rastro(partida: Partida, jogador: Jogador) -> List(Casa) {
-  let mascara = criar_mascara(partida, jogador)
-  let mascara = casas_exteriores(mascara)
-
-  pintar_mapa(partida.mapa, mascara, jogador.id)
+  criar_mascara(partida, jogador)
+  |> casas_exteriores
+  |> pintar_mapa(partida.mapa, _, jogador.id)
 }
 
 /// Mantém o rastro dentro do próprio território ou
@@ -1066,31 +1004,35 @@ pub fn marcar_intervalo(
   inicio: Int,
   fim: Int,
 ) -> List(EstadoCasa) {
-  case indice > fim {
-    True -> mascara
-    False -> {
-      case mascara {
-        [] -> []
-        [primeiro, ..resto] -> {
-          let novo_valor = case indice >= inicio {
-            True -> Exterior
-            False -> primeiro
-          }
-          [novo_valor, ..marcar_intervalo(resto, indice + 1, inicio, fim)]
-        }
+  case mascara {
+    _ if indice > fim -> mascara
+    [] -> []
+    [primeiro, ..resto] -> {
+      let novo_valor = case indice >= inicio {
+        True -> Exterior
+        False -> primeiro
       }
+
+      [novo_valor, ..marcar_intervalo(resto, indice + 1, inicio, fim)]
     }
   }
 }
-
-/// Devolve uma posição por grupo não explorado na linha
-/// *linha*, entre as colunas inicial e final do trecho.
+/// Adiciona às pendentes o começo de cada grupo não explorado
+/// na linha, entre as colunas inicial e final do trecho.
 pub fn conexoes_linha(
   mascara: List(EstadoCasa),
   trecho: Trecho,
   linha: Int,
+  pendentes: List(Posicao),
 ) -> List(Posicao) {
-  procurar_conexoes(mascara, linha, trecho.inicio, trecho.fim, True, [])
+  procurar_conexoes(
+    mascara,
+    linha,
+    trecho.inicio,
+    trecho.fim,
+    True,
+    pendentes,
+  )
 }
 
 /// Percorre a linha da coluna atual até fim, guardando em
@@ -1138,14 +1080,11 @@ pub fn scanline_fill(
           let trecho = encontrar_trecho(mascara, pos)
           let mascara = marcar_trecho(mascara, trecho)
 
-          let acima = conexoes_linha(mascara, trecho, trecho.linha - 1)
-          let abaixo = conexoes_linha(mascara, trecho, trecho.linha + 1)
+          let pendentes =
+            conexoes_linha(mascara, trecho, trecho.linha - 1, resto)
 
           let pendentes =
-            list.fold(acima, resto, fn(lista, pos) { [pos, ..lista] })
-
-          let pendentes =
-            list.fold(abaixo, pendentes, fn(lista, pos) { [pos, ..lista] })
+            conexoes_linha(mascara, trecho, trecho.linha + 1, pendentes)
 
           scanline_fill(mascara, pendentes)
         }
@@ -1309,12 +1248,12 @@ pub fn conexoes_linha_examples() {
   let trecho = Trecho(linha: 1, inicio: 0, fim: 3)
 
   // Uma posição por grupo, acumuladas pelo começo da lista.
-  check.eq(conexoes_linha(mascara, trecho, 0), [
+  check.eq(conexoes_linha(mascara, trecho, 0, []), [
     Posicao(0, 3),
     Posicao(0, 0),
   ])
 
-  check.eq(conexoes_linha(mascara, trecho, -1), [])
+  check.eq(conexoes_linha(mascara, trecho, -1, []), [])
 }
 
 pub fn procurar_conexoes_examples() {
@@ -1482,7 +1421,10 @@ pub fn ativar_poder(
 
           let jogadores =
             atualiza_jogador(atualizada.jogadores, jogador_id, fn(j) {
-              Jogador(..j, poderes_guardados: remover_poder(j.poderes_guardados, tipo))
+              Jogador(
+                ..j,
+                poderes_guardados: remover_poder(j.poderes_guardados, tipo),
+              )
             })
 
           Partida(..atualizada, jogadores: jogadores)
@@ -1521,10 +1463,10 @@ fn cor_casa(dono: Option(Int)) -> Color {
 }
 
 /// Produz a cor de um rastro conforme seu proprietário.
-fn cor_rastro(dono: Option(Int)) -> Color {
-  case dono {
-    Some(1) -> color.springgreen
-    Some(2) -> color.powderblue
+fn cor_rastro(id: Int) -> Color {
+  case id {
+    1 -> color.springgreen
+    2 -> color.powderblue
     _ -> color.white
   }
 }
@@ -1554,7 +1496,7 @@ fn desenha_casa(casa: Casa) -> Image {
 }
 
 fn desenha_rastro(id: Int) -> Image {
-  image.square(lado_casa, style.fill(cor_rastro(Some(id))))
+  image.square(lado_casa, style.fill(cor_rastro(id)))
 }
 
 fn desenha_poder(imagens: ImagensPoderes, tipo: TipoPoder) -> Image {
@@ -1596,8 +1538,10 @@ pub fn grade(partida: Partida, imagens_poderes: ImagensPoderes) -> Image {
     coloca_img(cena, casa.posicao, desenha_casa(casa))
   })
   |> list.fold(partida.jogadores, _, fn(cena, j) {
+    let quadrado = desenha_rastro(j.id)
+
     list.fold(j.rastro, cena, fn(imagem, pos) {
-      coloca_img(imagem, pos, desenha_rastro(j.id))
+      coloca_img(imagem, pos, quadrado)
     })
   })
   |> list.fold(partida.poderes, _, fn(imagem, poder) {
