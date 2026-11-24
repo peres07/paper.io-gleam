@@ -127,13 +127,13 @@ pub type PoderNoMapa {
 }
 
 /// Um jogador da partida. *id* identifica o jogador, *posicao* indica sua
-/// casa atual, *direcoes* guarda as direções dos movimentos e *rastro*
-/// contém as casas percorridas fora do território.
+/// casa atual, *direcao* indica para onde ele se move e *rastro*
+/// contém as casas percorridas fora do próprio território.
 pub type Jogador {
   Jogador(
     id: Int,
     posicao: Posicao,
-    direcoes: List(Direcao),
+    direcao: Direcao,
     rastro: List(Posicao),
     base: List(Posicao),
     // Poderes coletados e ainda não utilizados.
@@ -325,7 +325,7 @@ pub fn cria_jogador(id: Int) -> Jogador {
   Jogador(
     id: id,
     posicao: posicao,
-    direcoes: [direcao_inicial(id)],
+    direcao: direcao_inicial(id),
     rastro: [],
     base: base,
     poderes_guardados: [],
@@ -411,18 +411,11 @@ fn guardar_direcao(
 ) -> Partida {
   let jogadores =
     atualiza_jogador(partida.jogadores, jogador_id, fn(j) {
-      case j.reaparecimento == 0 {
-        True -> {
-          let pode_mudar = case j.direcoes {
-            [direcao_atual, ..] -> !sao_opostas(direcao_atual, nova_direcao)
-            [] -> True
-          }
-
-          case pode_mudar {
-            True -> Jogador(..j, direcoes: [nova_direcao])
-            False -> j
-          }
-        }
+      case
+        j.reaparecimento == 0
+        && !sao_opostas(j.direcao, nova_direcao)
+      {
+        True -> Jogador(..j, direcao: nova_direcao)
         False -> j
       }
     })
@@ -541,11 +534,7 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
           }
 
           case tiques % intervalo == 0 {
-            True ->
-              case jogador.direcoes {
-                [direcao, ..] -> move(acumulado, jogador.id, direcao)
-                [] -> acumulado
-              }
+            True -> move(acumulado, jogador.id, jogador.direcao)
             False -> acumulado
           }
         })
@@ -815,7 +804,7 @@ pub fn reinicia_jogador_examples() {
     Jogador(
       ..inicial,
       posicao: Posicao(10, 10),
-      direcoes: [Cima],
+      direcao: Cima,
       rastro: [Posicao(10, 10)],
       velocidade_extra: 10,
       velocidade: 7.5,
@@ -826,7 +815,7 @@ pub fn reinicia_jogador_examples() {
   check.eq(reiniciado.id, jogador.id)
   check.eq(reiniciado.posicao, inicial.posicao)
   check.eq(reiniciado.base, jogador.base)
-  check.eq(reiniciado.direcoes, inicial.direcoes)
+  check.eq(reiniciado.direcao, inicial.direcao)
   check.eq(reiniciado.rastro, [])
   check.eq(reiniciado.poderes_guardados, [])
   check.eq(reiniciado.velocidade_extra, 0)
