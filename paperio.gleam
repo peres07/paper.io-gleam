@@ -448,19 +448,10 @@ pub fn processa_tecla(estado: Estado, numero: Int, tecla: key.Event) -> Estado {
       EmPartida(gerador, imagens, nova_partida())
     Resultado(gerador, imagens, jogadores), key.Enter ->
       EmPartida(gerador, imagens, nova_partida())
-    EmPartida(gerador, imagens, partida), key.Char("1") -> {
-      case tem_poder(partida, numero, Expansao) {
-        True ->
-          EmPartida(gerador, imagens, ativar_poder(partida, numero, Expansao))
-        False -> estado
-      }
-    }
+    EmPartida(gerador, imagens, partida), key.Char("1") ->
+      EmPartida(gerador, imagens, ativar_poder(partida, numero, Expansao))
     EmPartida(gerador, imagens, partida), key.Char("2") ->
-      case tem_poder(partida, numero, Velocidade) {
-        True ->
-          EmPartida(gerador, imagens, ativar_poder(partida, numero, Velocidade))
-        False -> estado
-      }
+      EmPartida(gerador, imagens, ativar_poder(partida, numero, Velocidade))
     EmPartida(gerador, imagens, partida), _ ->
       case direcao(tecla) {
         Some(dir) ->
@@ -483,19 +474,14 @@ pub fn tique(estado: Estado) -> Estado {
   }
 }
 
-/// Retorna True caso algum jogador *j* esteja na
-/// posição *pos*
-pub fn ocupada(jogadores: List(Jogador), pos: Posicao) -> Bool {
-  list.any(jogadores, fn(j) { j.posicao == pos })
-}
-
 /// Produz a lista de posições do mapa da *partida* que não tem
 /// nem jogador, nem poder
 pub fn casas_livres(partida: Partida) -> List(Posicao) {
   let posicoes_poderes = list.map(partida.poderes, fn(poder) { poder.posicao })
 
-  list.filter(todas_as_casas(), fn(casa) {
-    !list.contains(posicoes_poderes, casa) && !ocupada(partida.jogadores, casa)
+  list.filter(todas_as_casas(), fn(pos) {
+    !list.contains(posicoes_poderes, pos)
+    && !list.any(partida.jogadores, fn(j) { j.posicao == pos })
   })
 }
 
@@ -686,7 +672,7 @@ pub fn desloca(
 
   case
     dentro_do_mapa(destino),
-    contem_posicao(destino, base_adversario),
+    list.contains(base_adversario, destino),
     Some(destino) == adversario_pos
   {
     True, False, False -> destino
@@ -878,9 +864,9 @@ pub fn mover_jogador(
     )
 
   let moveu = nova_pos != jogador.posicao
-  let cortou_rastro = moveu && contem_posicao(nova_pos, jogador.rastro)
+  let cortou_rastro = moveu && list.contains(jogador.rastro, nova_pos)
   let cortou_rastro_adversario =
-    moveu && contem_posicao(nova_pos, adversario.rastro)
+    moveu && list.contains(adversario.rastro, nova_pos)
   let voltou_area = dono_da_casa(partida.mapa, nova_pos) == Some(jogador.id)
   let fechou_rastro = moveu && voltou_area && jogador.rastro != []
 
@@ -961,19 +947,10 @@ pub fn atualizar_rastro(
   }
 }
 
-/// Retorna True se a posição *pos* já está em *posicoes*,
-/// Retorna False caso contrário.
-pub fn contem_posicao(pos: Posicao, posicoes: List(Posicao)) -> Bool {
-  case posicoes {
-    [] -> False
-    [p, ..resto] -> p == pos || contem_posicao(pos, resto)
-  }
-}
-
 /// Adiciona a posição *pos* na lista *rastro*. Caso a
 /// posição já esteja na lista, não muda o rastro
 pub fn adicionar_rastro(pos: Posicao, rastro: List(Posicao)) -> List(Posicao) {
-  case contem_posicao(pos, rastro) {
+  case list.contains(rastro, pos) {
     True -> rastro
     False -> [pos, ..rastro]
   }
@@ -990,17 +967,6 @@ pub type EstadoCasa {
   Exterior
 }
 
-/// Devolve as posições vizinhas que ficam dentro do mapa.
-pub fn casas_vizinhas(pos: Posicao) -> List(Posicao) {
-  [
-    Posicao(pos.lin - 1, pos.col),
-    Posicao(pos.lin + 1, pos.col),
-    Posicao(pos.lin, pos.col - 1),
-    Posicao(pos.lin, pos.col + 1),
-  ]
-  |> list.filter(dentro_do_mapa)
-}
-
 /// Cria a máscara na mesma ordem das casas do mapa.
 /// O território e o rastro do jogador formam a barreira.
 /// As outras casas começam como não exploradas.
@@ -1008,7 +974,7 @@ pub fn criar_mascara(partida: Partida, jogador: Jogador) -> List(EstadoCasa) {
   list.map(partida.mapa, fn(casa) {
     case
       casa.dono == Some(jogador.id)
-      || contem_posicao(casa.posicao, jogador.rastro)
+      || list.contains(jogador.rastro, casa.posicao)
     {
       True -> TerritorioOuRastro
       False -> NaoExplorada
@@ -1229,20 +1195,6 @@ pub fn pintar_mapa(
 // ----------------------------------------------------------------------
 // Flood Fill - Examples
 // ----------------------------------------------------------------------
-
-pub fn vizinhas_examples() {
-  check.eq(casas_vizinhas(Posicao(0, 0)), [
-    Posicao(1, 0),
-    Posicao(0, 1),
-  ])
-
-  check.eq(casas_vizinhas(Posicao(5, 5)), [
-    Posicao(4, 5),
-    Posicao(6, 5),
-    Posicao(5, 4),
-    Posicao(5, 6),
-  ])
-}
 
 pub fn criar_mascara_examples() {
   let jogador = Jogador(..cria_jogador(1), rastro: [Posicao(0, 1)])
@@ -1486,17 +1438,6 @@ pub fn remover_poder(
   }
 }
 
-pub fn tem_poder(partida: Partida, jogador_id: Int, tipo: TipoPoder) -> Bool {
-  case busca_jogador(partida.jogadores, jogador_id) {
-    Ok(j) -> list.contains(j.poderes_guardados, tipo)
-    Error(_) -> False
-  }
-}
-
-pub fn aumentar_velocidade(j: Jogador) -> Jogador {
-  Jogador(..j, velocidade: velocidade_boost, velocidade_extra: boost_tempo)
-}
-
 pub fn ativar_expansao(j: Jogador, partida: Partida) -> Partida {
   let mapa =
     list.map(partida.mapa, fn(casa) {
@@ -1508,7 +1449,7 @@ pub fn ativar_expansao(j: Jogador, partida: Partida) -> Partida {
 
       let base_adversaria =
         list.any(partida.jogadores, fn(outro) {
-          outro.id != j.id && contem_posicao(casa.posicao, outro.base)
+          outro.id != j.id && list.contains(outro.base, casa.posicao)
         })
 
       case perto && !base_adversaria {
@@ -1520,33 +1461,46 @@ pub fn ativar_expansao(j: Jogador, partida: Partida) -> Partida {
   atualizar_placares(Partida(..partida, mapa: mapa))
 }
 
+/// Ativa o poder se ele estiver guardado no inventário do jogador.
+/// Aplica o efeito e consome uma unidade; se o jogador não existir
+/// ou não possuir o poder, mantém a partida.
 pub fn ativar_poder(
   partida: Partida,
   jogador_id: Int,
   tipo: TipoPoder,
 ) -> Partida {
-  let atualizada = case tipo {
-    Velocidade -> {
-      let jogadores =
-        atualiza_jogador(partida.jogadores, jogador_id, aumentar_velocidade)
+  case busca_jogador(partida.jogadores, jogador_id) {
+    Error(_) -> partida
+    Ok(jogador) -> {
+      case list.contains(jogador.poderes_guardados, tipo) {
+        False -> partida
+        True -> {
+          let atualizada = case tipo {
+            Velocidade -> {
+              let jogadores =
+                atualiza_jogador(partida.jogadores, jogador_id, fn(j) {
+                  Jogador(
+                    ..j,
+                    velocidade: velocidade_boost,
+                    velocidade_extra: boost_tempo,
+                  )
+                })
 
-      Partida(..partida, jogadores: jogadores)
-    }
+              Partida(..partida, jogadores: jogadores)
+            }
+            Expansao -> ativar_expansao(jogador, partida)
+          }
 
-    Expansao -> {
-      case busca_jogador(partida.jogadores, jogador_id) {
-        Ok(j) -> ativar_expansao(j, partida)
-        Error(_) -> partida
+          let jogadores =
+            atualiza_jogador(atualizada.jogadores, jogador_id, fn(j) {
+              Jogador(..j, poderes_guardados: remover_poder(j.poderes_guardados, tipo))
+            })
+
+          Partida(..atualizada, jogadores: jogadores)
+        }
       }
     }
   }
-
-  let jogadores =
-    atualiza_jogador(atualizada.jogadores, jogador_id, fn(j) {
-      Jogador(..j, poderes_guardados: remover_poder(j.poderes_guardados, tipo))
-    })
-
-  Partida(..atualizada, jogadores: jogadores)
 }
 
 // ----------------------------------------------------------------------
