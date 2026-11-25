@@ -6,14 +6,14 @@
 //
 // Regras
 //
-// - Dois jogadores. Cada jogador começa com uma base própria
-//   em um lado do tabuleiro.
+// - Dois jogadores. Cada jogador começa com uma base própria em um lado do tabuleiro.
 // - Ao sair do próprio território, o jogador deixa um rastro. Ao retornar
 //   a qualquer território próprio, inclusive uma ilha criada pela expansão, o rastro e as
 //   casas cercadas são conquistados.
 // - A base inicial de cada jogador é permanente e não pode ser conquistada
 //   pelo adversário. Os demais territórios podem ser conquistados por ambos.
-// - Atravessar o rastro adversário elimina seu dono. O jogador eliminado
+// - Atravessar o rastro adversário elimina seu dono; atravessar o próprio
+//   rastro fora do território elimina o jogador. O jogador eliminado
 //   perde o rastro, os poderes guardados e o efeito de velocidade, mas
 //   mantém seus territórios e reaparece após 2 segundos em sua base.
 // - Encostar diretamente no personagem adversário não elimina.
@@ -22,8 +22,10 @@
 // - Os poderes são coletados ao passar pela casa e ficam guardados
 //   até serem utilizados.
 // - Expansão: conquista as casas de uma área 3x3 ao redor do personagem,
-//   exceto as pertencentes à base adversária.
+//   exceto as pertencentes à base adversária. Se houver rastro ativo,
+//   a expansão fecha o rastro ao colocar o jogador em território próprio.
 // - Velocidade: aumenta a velocidade do jogador por 4 segundos.
+//   Não consome outro poder enquanto o efeito estiver ativo.
 // - A partida dura 60 segundos
 // - Cada casa do território vale 1 ponto. Vence quem possuir mais
 //   territórios ao final da partida, podendo haver empate.
@@ -31,7 +33,8 @@
 // Controles
 //
 // - Enter: começa a partida na abertura ou volta à abertura no resultado.
-// - Setas: movimentam o personagem uma casa nas quatro direções.
+// - Setas: alteram a direção do movimento automático, sem permitir
+//   a inversão em relação ao último movimento realizado.
 // - Tecla 1: utiliza um poder de expansão armazenado.
 // - Tecla 2: utiliza um poder de velocidade armazenado.
 
@@ -61,28 +64,28 @@ const tamanho = 20
 const lado_casa = 20
 
 /// Quantidade de tiques por segundo.
-const tiques_por_segundo = 10
+const tiques_por_segundo = 30
 
-/// Duração da partida, em tiques (60 segundos).
-const duracao = 600
+/// Duração da partida, em segundos.
+const duracao_segundos = 60
 
-/// Largura da tela, em pixels.
-const largura = 400
-
-/// Altura da tela, em pixels.
-const altura = 520
+/// Espaço vertical reservado ao cabeçalho e às margens da tela.
+const altura_extra = 120
 
 /// Velocidade da cobra
-const velocidade_cobra = 2.0
+const velocidade_cobra = 4.0
 
-/// Velocidade extra da cobra
-const velocidade_boost = 3.0
+/// Velocidade nova da cobra durante o boost
+const velocidade_boost = 6.0
 
-/// Tempo de velocidade extra
-const boost_tempo = 40
+/// Duração do efeito de velocidade, em segundos.
+const boost_segundos = 4
 
-/// Delay poder (8 segundos)
-const delay_poder = 80
+/// Intervalo entre os surgimentos de poderes, em segundos.
+const delay_poder_segundos = 8
+
+/// Tempo de espera para reaparecer, em segundos.
+const reaparecimento_segundos = 2
 
 // ----------------------------------------------------------------------
 // Tipos de dados
@@ -115,7 +118,12 @@ pub type TipoPoder {
 }
 
 pub type ImagensPoderes {
-  ImagensPoderes(velocidade: Image, expansao: Image)
+  ImagensPoderes(
+    velocidade: Image,
+    expansao: Image,
+    velocidade_mapa: Image,
+    expansao_mapa: Image,
+  )
 }
 
 /// Um poder disponível no mapa. *tipo* indica o efeito do poder e
@@ -131,15 +139,16 @@ pub type Jogador {
   Jogador(
     id: Int,
     posicao: Posicao,
+    // Direção solicitada pelas teclas.
     direcao: Direcao,
+    // Direção do último movimento efetivamente realizado.
+    ultima_direcao: Direcao,
     rastro: List(Posicao),
     base: List(Posicao),
     // Poderes coletados e ainda não utilizados.
     poderes_guardados: List(TipoPoder),
     // Tiques restantes do efeito de velocidade.
     velocidade_extra: Int,
-    // Velocidade de movimento em casas por segundo.
-    velocidade: Float,
     // Tiques restantes até o jogador reaparecer.
     reaparecimento: Int,
   )
@@ -265,6 +274,12 @@ fn carrega_imagens() -> ImagensPoderes {
     expansao: image.bitmap_data_uri(
       "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABwAAAAcCAYAAAByDd+UAAAELUlEQVR42r2Wz29UVRTHP+feOzOvM9OWRkAwREOIClGKweCPEEPUja7YGN0Q/wzjgo07ExP1n3ChIZHEjQs1JvVHAKMUqgRigj8o0hZop/PzvXfvPS5m6MxIp5UGfcnb3Pfe/dxzvud83wFAVYX//hIAUVUREX3v1JePJNXqwbTVQiUIYeBVu5X9HSHG+M3cXKwtr56f+fDkX4AIIO+fmtlLkR+ScnnK5znWWhBBAAU0xnvGKeCM4beFBc7Mzt5IyubI5++8Pe8AjdZPl8sTU83VWladnLDFpIQYgzGGPM2o3bqNbgFYMIZx50KpXN2Vp+2ngGsOAGO9z3NNymO2MlG1qkoMkVa9TqfZ7guwhSvEiAavEWI30d2UiYiILXTFyjoZ9eUVvPeICMYIKCOjFAHdKAUia+c1g+vGGDRG6ssrhBAwvbT6oPgROkZVch8H99zw6gNVMcaQpVk/MhGy3DNZLjFVGSNGvQtWKRXZOVkhzT3mX0CHIsyznE6r3YtW6OSe7RMVThx7mlcPP05UXdPSiJD5wHOPPcybLx7h0d0P0ErzTaFrQDGGVr1Bp9XGOUsn8+ycrPD60WkqYyWsMVhrQLqSiHShRWexVjj+zBPs37NjU6j5p/rWmAHYIapJCQ2eqErmPbmP5D6Q+0jmPUH72h5/tgfNcuwIqBuii9DOcx6crPZgRdI8UHKWUsHx0NQE2msR6elbTUqoKjEqVrqRcvZnLl1bZHwsGQ0UEXwI7No2zmvPH6SaFMl8wBrBx8i2SsKJY4fRno46UO3eB4wRYowYY7pQ4OrCMv8M1Aw6ax4iLxzYy0SlTCcbrjpV0F6z6dqarq31Dx1x1vDSk/swRu7qTzNkRdYw88tVao0WSdERhzbbtKdRVZw15D7yxcVfiVHv+s4Nv2xZqDX45LsLvHF0mvGx0pqGtxotPjt3CUXXNEzzwMvT+9i3eztZ5rtVDJw+O8fl+SXGxxJanQ2qNKqSFBw3V5t8/O0F6u2UorOAkuaeGyt1lmpNFmtNlmpNFlbqNNOsb3/A6TNzXLl+k0qpOJTu9dtiBFSsw4hQcJaCMwO3xUp/i9Nn5rh8/SblYoEwwlzNKH/sQ2eptzv4GAkhdk28d3d7M+BD5NMBWNzAyd2oB3egtxstPvr6R4zpeqsOPC86y/dXfuenq/Ms1pqbwjYE9jd11NspimLNcEKMCK00p9HJKBXcprBNgXeq1xoBZN3/oRHBGlm3QDYE9ptY1h0XNj7UOmvCuodwAGmaUq1W1VnL/ZoXu0bSnSDiwI/UAcxcmDUH9x+QCedCiHG0rdwTURERrvz5R0CMNb2OcICspun5cxcvLiXlyo4Ywv2ZeqVr5hhj1aeLWZbP3hl/BERfeevdPVoqHvKdjoDd4vA7OK51D+6SquaN1fNffXByfqBA/r9R/2++TjJoeEgdIQAAAABJRU5ErkJggg==",
     ),
+    velocidade_mapa: image.bitmap_data_uri(
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAACIElEQVR42p2TP2hTURTGv3vfy/+kDVZFKCpIMerkUBw6VJFULepoRR3r5tJBLILwjIO0oyCIi5sgAXERg5YasYpaoWjRGC0qFUGhJsEm8cXXl/s5vCSNMSSpd7lwz+F3vu/cc4A1HBKicmuNMdkpgIQQAuSzrcN4FDpZD+4IVE0WAuSL7aexYsZgl14BAC6uglpD4sdqFji3x+DTzZZ933emUU0bJYYEAD6JhJg+fIML/eR0MME4fFWr9fl6cyuGECKm+HogAk/PVXhyUbX4MaOswqTrOEy+hQ5AAWBzFYAg6fxMav8Q3x95w3cD5MwGmwkRa+VA1CsRwqnA9NAotMBllL5vRPGHUr/zJam5rsATWASECwrucuFbTsv8vCVGYNasORBBGoM6RngJ3vA55L9oKOYAqUnpDvkgtfOgAHQBqAywUryAHOyqAFHrSwJu5QlPSH9oTJVRhFVQEELB0x2QwU06fmUVNEhY2Xw5uzSuH8W15tbicCOIHTCdN8sLJXWtT+/ddx267MHyJ6nM5a/KXBpzHcJtGpAiBtWmbQ6fqQOTXBi2OdfH8sN189ZdDAIAjTaDTAOShE5CcL4/yvTBLFO7WJ7uSpYSiFTaIIk2w1gdNH7e62Uqeo8fdpNT/pu8g3AVsrbtfr5zlC8jNpPdE6zsI+P/bnxryOyWbZzpneUD/9nGWIcL6lTk4/UnONV16r8gfwGTq0Patql15w/cWw8ArWCW7wAAAABJRU5ErkJggg==",
+    ),
+    expansao_mapa: image.bitmap_data_uri(
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAADHElEQVR42o2TS2hdVRSGv7X2OffR25v2hlRtaqGmD5REUynUDooDsaiDqp0JnXfoUDqLDoQOnKgzZ44EpYJSi1gFQVFaH2iFtir4QBojMfe0Se7rnL3XcpC0JgOl/2iz2Ovj52NvYT1n3r6wbTBa8OH1vgB0pjr8fzq8+9nnfun1l5YBZG5uTscPP/lKrdl4PJajGDQEA1JVgf4Hw5wsz6272tdPL1388JMzL5zOJo8ebw/K6ni92djX3t4GoL+8Sr+qEN+4LQA4DiKkGGk3mzQazca+k8+/nBVFQaO1dSVkmkb9vt/4u6tmaX1VbmMcEFmbmTtB1CoQd+uFesO1KApUPQiE5e4NtZQ0uWjQoIgoIuqCBlV1R81REVEEBQKIwgYL/dU+mDGIkendd/Hc0YPkQQkiVNGY3TPJiSMP4u4kM0RlkzbtdDo4MOoPWB2VzOy+h6cOPUC7WWcYI/2yoj8sQZy9Oyd49sg0IkKKhohwS2NWUNCSNkNba/L04WkwA5zZPZPEmIjJmBwfI6XE/skdnHhkhnNfXyGa37aYTXWmWBmOuHusxTOHp0lmmDvNWs4TD9+/obxTVpGyiuyb3MGx2f2cvXQVXVNEVhQFzXabojfgh98WmN27i7KsiGb8Or+Iu5HMmRhrsb3VJMszVgdDLv++QBYUsDUQgIiRDM5/ew0XODh1L8VKj/e+ukKsIoMy8ujMfTz20AF6gyFnv7zM/NIKtVpOWpeUAbiDilDLA+e/uYaqcmDnBLkKmgeiO/UsYzCqeOeLy1xfusnWZp1R2uBoowNByLPAhe9+4uoffxGT4UAelB/nF/n5z0Xmu6tsqdcw2/Ts10CGowhmjqrgDr8sLJFnGQgEVRZv9nCcRi0jmpGJ4u6bQTXJzcRSUF3rKpDVa5su1teh7k5QRVUtRxzEAPStD87JfHepVRlhlCwrDS0NHSXXW+fS0JH5v7PkWibPil4/VKlqbWttkez7N19dnti56/3W2NixajhM4IE7iIqkqCGkFD+6+NqLK7c/zKFTp7aFXt274+PcUbpd9rR2ycdvnL4J8A8QroR/EIU1NgAAAABJRU5ErkJggg==",
+    ),
   )
 }
 
@@ -370,11 +385,11 @@ pub fn cria_jogador(id: Int) -> Jogador {
     id: id,
     posicao: posicao,
     direcao: direcao_inicial(id),
+    ultima_direcao: direcao_inicial(id),
     rastro: [],
     base: base,
     poderes_guardados: [],
     velocidade_extra: 0,
-    velocidade: velocidade_cobra,
     reaparecimento: 0,
   )
 }
@@ -386,7 +401,9 @@ pub fn cria_jogador_examples() {
   check.eq(j2.posicao, Posicao(1, tamanho - 2))
   check.eq(j1.base, base_inicial(1))
   check.eq(j1.rastro, [])
-  check.eq(j1.velocidade, velocidade_cobra)
+  check.eq(velocidade_atual(j1), velocidade_cobra)
+  check.eq(j1.ultima_direcao, Cima)
+  check.eq(j2.ultima_direcao, Baixo)
 }
 
 /// Define a direção inicial baseada no *id* do jogador.
@@ -401,6 +418,28 @@ pub fn direcao_inicial_examples() {
   check.eq(direcao_inicial(1), Cima)
   check.eq(direcao_inicial(2), Baixo)
   check.eq(direcao_inicial(0), Baixo)
+}
+
+/// Devolve a velocidade em casas por segundo de acordo com o tempo
+/// restante do efeito de velocidade.
+pub fn velocidade_atual(jogador: Jogador) -> Float {
+  case jogador.velocidade_extra > 0 {
+    True -> velocidade_boost
+    False -> velocidade_cobra
+  }
+}
+
+pub fn velocidade_atual_examples() {
+  let j = cria_jogador(1)
+  check.eq(velocidade_atual(j), velocidade_cobra)
+  check.eq(
+    velocidade_atual(Jogador(..j, velocidade_extra: 1)),
+    velocidade_boost,
+  )
+  check.eq(
+    velocidade_atual(Jogador(..j, velocidade_extra: 0)),
+    velocidade_cobra,
+  )
 }
 
 /// Começa uma partida com dois jogadores e suas bases.
@@ -429,7 +468,7 @@ pub fn nova_partida() -> Partida {
     jogadores: [cria_jogador(1), cria_jogador(2)],
     poderes: [],
     tiques: 0,
-    proximo_poder: delay_poder,
+    proximo_poder: delay_poder_segundos * tiques_por_segundo,
     placares: [],
   )
   |> atualizar_placares
@@ -449,8 +488,9 @@ pub fn nova_partida_examples() {
   check.eq(p.poderes, [])
 
   check.eq(p.tiques, 0)
-  check.eq(p.proximo_poder, delay_poder)
+  check.eq(p.proximo_poder, delay_poder_segundos * tiques_por_segundo)
 }
+
 // ----------------------------------------------------------------------
 // Teclas
 // ----------------------------------------------------------------------
@@ -473,7 +513,8 @@ pub fn sao_opostas_examples() {
 }
 
 /// Muda a direção do jogador com id *id*, desde que ele não esteja
-/// esperando para reaparecer nem tente virar para a direção oposta.
+/// esperando para reaparecer nem tente virar para a direção oposta à
+/// do último movimento efetivamente realizado.
 /// Caso contrário, mantém a partida como está.
 pub fn guardar_direcao(
   partida: Partida,
@@ -482,7 +523,9 @@ pub fn guardar_direcao(
 ) -> Partida {
   let jogadores =
     atualiza_jogador(partida.jogadores, id, fn(j) {
-      case j.reaparecimento == 0 && !sao_opostas(j.direcao, nova_direcao) {
+      case
+        j.reaparecimento == 0 && !sao_opostas(j.ultima_direcao, nova_direcao)
+      {
         True -> Jogador(..j, direcao: nova_direcao)
         False -> j
       }
@@ -502,6 +545,26 @@ pub fn guardar_direcao_examples() {
 
   // Não deixa ir para a direção contrária
   check.eq(guardar_direcao(p, 1, Baixo), p)
+
+  // Duas teclas antes de um movimento não permitem inverter a direção.
+  let virou = guardar_direcao(p, 1, Direita)
+  check.eq(guardar_direcao(virou, 1, Baixo), virou)
+
+  // Após andar para a direita, pode virar para baixo, mas não para a esquerda.
+  let completa = guardar_direcao(nova_partida(), 1, Direita)
+  let movida = move(completa, 1, Direita)
+  check.eq(guardar_direcao(movida, 1, Esquerda), movida)
+  check.eq(
+    busca_jogador(guardar_direcao(movida, 1, Baixo).jogadores, 1),
+    Ok(
+      Jogador(
+        ..j,
+        posicao: Posicao(tamanho - 2, 2),
+        direcao: Baixo,
+        ultima_direcao: Direita,
+      ),
+    ),
+  )
 
   let esperando = Partida(..p, jogadores: [Jogador(..j, reaparecimento: 5)])
 
@@ -540,8 +603,7 @@ pub fn processa_tecla(estado: Estado, id: Int, tecla: key.Event) -> Estado {
   case estado, tecla {
     Abertura(gerador, imagens), key.Enter ->
       EmPartida(gerador, imagens, nova_partida())
-    Resultado(gerador, imagens, _), key.Enter ->
-      Abertura(gerador, imagens)
+    Resultado(gerador, imagens, _), key.Enter -> Abertura(gerador, imagens)
     EmPartida(gerador, imagens, partida), key.Char("1") ->
       EmPartida(gerador, imagens, ativar_poder(partida, id, Expansao))
     EmPartida(gerador, imagens, partida), key.Char("2") ->
@@ -558,7 +620,13 @@ pub fn processa_tecla(estado: Estado, id: Int, tecla: key.Event) -> Estado {
 
 pub fn processa_tecla_examples() {
   let g = random.new(0)
-  let img = ImagensPoderes(velocidade: image.empty, expansao: image.empty)
+  let img =
+    ImagensPoderes(
+      velocidade: image.empty,
+      expansao: image.empty,
+      velocidade_mapa: image.empty,
+      expansao_mapa: image.empty,
+    )
   let abertura = Abertura(g, img)
 
   // Enter na abertura -> nova partida.
@@ -588,7 +656,13 @@ pub fn tique(estado: Estado) -> Estado {
 
 pub fn tique_examples() {
   let g = random.new(0)
-  let img = ImagensPoderes(velocidade: image.empty, expansao: image.empty)
+  let img =
+    ImagensPoderes(
+      velocidade: image.empty,
+      expansao: image.empty,
+      velocidade_mapa: image.empty,
+      expansao_mapa: image.empty,
+    )
 
   // tique só avança na partida em si
   check.eq(tique(Abertura(g, img)), Abertura(g, img))
@@ -699,7 +773,7 @@ pub fn sorteia_poder_examples() {
 pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
   let tiques = partida.tiques + 1
 
-  case tiques >= duracao {
+  case tiques >= duracao_segundos * tiques_por_segundo {
     True -> Resultado(gerador, imagens, partida.placares)
     False -> {
       let jogadores =
@@ -718,7 +792,7 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
             int.max(
               1,
               float.round(
-                int.to_float(tiques_por_segundo) /. jogador.velocidade,
+                int.to_float(tiques_por_segundo) /. velocidade_atual(jogador),
               ),
             )
 
@@ -728,22 +802,14 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
           }
         })
 
-        let jogadores =
-          list.map(movimentada.jogadores, fn(jogador) {
-            case jogador.velocidade_extra {
-              1 ->
-                Jogador(
-                  ..jogador,
-                  velocidade_extra: 0,
-                  velocidade: velocidade_cobra,
-                )
-
-              tempo if tempo > 1 ->
-                Jogador(..jogador, velocidade_extra: tempo - 1)
-
-              _ -> jogador
-            }
-          })
+      let jogadores =
+        list.map(movimentada.jogadores, fn(jogador) {
+          case jogador.velocidade_extra > 0 {
+            True ->
+              Jogador(..jogador, velocidade_extra: jogador.velocidade_extra - 1)
+            False -> jogador
+          }
+        })
 
       let movimentada = Partida(..movimentada, jogadores: jogadores)
 
@@ -752,7 +818,11 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
           let #(poderes, novo_gerador) = sorteia_poder(gerador, movimentada)
 
           let atualizada =
-            Partida(..movimentada, poderes: poderes, proximo_poder: delay_poder)
+            Partida(
+              ..movimentada,
+              poderes: poderes,
+              proximo_poder: delay_poder_segundos * tiques_por_segundo,
+            )
 
           EmPartida(novo_gerador, imagens, atualizada)
         }
@@ -770,22 +840,59 @@ pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
 
 pub fn avanca_examples() {
   let g = random.new(0)
-  let img = ImagensPoderes(velocidade: image.empty, expansao: image.empty)
+  let img =
+    ImagensPoderes(
+      velocidade: image.empty,
+      expansao: image.empty,
+      velocidade_mapa: image.empty,
+      expansao_mapa: image.empty,
+    )
   let p = nova_partida()
 
   // Mostra o resultado quando acabar
   check.eq(
-    avanca(g, img, Partida(..p, tiques: duracao - 1)),
+    avanca(
+      g,
+      img,
+      Partida(..p, tiques: duracao_segundos * tiques_por_segundo - 1),
+    ),
     Resultado(g, img, p.placares),
   )
 
-  // Atualiza o delay do poder
+  // Atualiza a espera pelo próximo poder, sem depender da velocidade.
+  let sem_jogadores = Partida(..p, jogadores: [])
   check.eq(
-    avanca(g, img, p),
-    EmPartida(g, img, Partida(..p, tiques: 1, proximo_poder: delay_poder - 1)),
+    avanca(g, img, sem_jogadores),
+    EmPartida(
+      g,
+      img,
+      Partida(
+        ..sem_jogadores,
+        tiques: 1,
+        proximo_poder: delay_poder_segundos * tiques_por_segundo - 1,
+      ),
+    ),
   )
 
-  let p = Partida(..nova_partida(), tiques: 4)
+  // O efeito expira e a velocidade passa a ser normal.
+  let j = Jogador(..cria_jogador(1), velocidade_extra: 1)
+  let com_boost = Partida(..p, jogadores: [j])
+  case avanca(g, img, com_boost) {
+    EmPartida(_, _, atualizada) -> {
+      let esperado = Jogador(..j, velocidade_extra: 0)
+      check.eq(busca_jogador(atualizada.jogadores, 1), Ok(esperado))
+      check.eq(velocidade_atual(esperado), velocidade_cobra)
+    }
+    _ -> check.eq(False, True)
+  }
+
+  let intervalo =
+    int.max(
+      1,
+      float.round(int.to_float(tiques_por_segundo) /. velocidade_cobra),
+    )
+
+  let p = Partida(..nova_partida(), tiques: intervalo - 1)
   let j1 = Jogador(..cria_jogador(1), posicao: Posicao(tamanho - 3, 1))
   let j2 = Jogador(..cria_jogador(2), posicao: Posicao(2, tamanho - 2))
 
@@ -797,8 +904,8 @@ pub fn avanca_examples() {
       img,
       Partida(
         ..p,
-        tiques: 5,
-        proximo_poder: delay_poder - 1,
+        tiques: intervalo,
+        proximo_poder: delay_poder_segundos * tiques_por_segundo - 1,
         jogadores: [j1, j2],
       ),
     ),
@@ -959,7 +1066,6 @@ pub fn move_examples() {
   check.eq(move(partida, 3, Cima), partida)
 }
 
-
 /// Reinicia o jogador após a eliminação
 ///
 /// - Volta ao centro da base, com a direção e a velocidade dafaults.
@@ -970,7 +1076,10 @@ pub fn move_examples() {
 pub fn reinicia_jogador(jogador: Jogador) -> Jogador {
   let jogador_inicial = cria_jogador(jogador.id)
 
-  Jogador(..jogador_inicial, reaparecimento: 2 * tiques_por_segundo)
+  Jogador(
+    ..jogador_inicial,
+    reaparecimento: reaparecimento_segundos * tiques_por_segundo,
+  )
 }
 
 pub fn reinicia_jogador_examples() {
@@ -981,18 +1090,22 @@ pub fn reinicia_jogador_examples() {
       rastro: [Posicao(5, 4)],
       poderes_guardados: [Velocidade],
       velocidade_extra: 10,
-      velocidade: velocidade_boost,
     )
   check.eq(
     reinicia_jogador(j),
-    Jogador(..cria_jogador(1), reaparecimento: 2 * tiques_por_segundo),
+    Jogador(
+      ..cria_jogador(1),
+      reaparecimento: reaparecimento_segundos * tiques_por_segundo,
+    ),
   )
   check.eq(
     reinicia_jogador(cria_jogador(2)),
-    Jogador(..cria_jogador(2), reaparecimento: 2 * tiques_por_segundo),
+    Jogador(
+      ..cria_jogador(2),
+      reaparecimento: reaparecimento_segundos * tiques_por_segundo,
+    ),
   )
 }
-
 
 /// Move o jogador na direção indicada e atualiza a partida, respeitando
 /// as bordas e as bases
@@ -1017,22 +1130,14 @@ pub fn mover_jogador(
   }
 
   let nova_pos =
-    desloca(
-      jogador.posicao,
-      direcao,
-      adversario.base,
-      adversario_pos,
-    )
+    desloca(jogador.posicao, direcao, adversario.base, adversario_pos)
 
   let moveu = nova_pos != jogador.posicao
 
-  let voltou_area =
-    dono_da_casa(partida.mapa, nova_pos) == Some(jogador.id)
+  let voltou_area = dono_da_casa(partida.mapa, nova_pos) == Some(jogador.id)
 
   let cortou_rastro =
-    moveu
-    && !voltou_area
-    && list.contains(jogador.rastro, nova_pos)
+    moveu && !voltou_area && list.contains(jogador.rastro, nova_pos)
 
   let cortou_rastro_adversario =
     moveu && list.contains(adversario.rastro, nova_pos)
@@ -1070,9 +1175,19 @@ pub fn mover_jogador(
     False -> atualizar_rastro(partida, jogador, nova_pos)
   }
 
+  let ultima_direcao = case moveu {
+    True -> direcao
+    False -> jogador.ultima_direcao
+  }
   let jogador_movido = case cortou_rastro {
     True -> reinicia_jogador(jogador_com_poder)
-    False -> Jogador(..jogador_com_poder, posicao: nova_pos, rastro: rastro)
+    False ->
+      Jogador(
+        ..jogador_com_poder,
+        posicao: nova_pos,
+        rastro: rastro,
+        ultima_direcao: ultima_direcao,
+      )
   }
   let novo_adversario = case cortou_rastro_adversario {
     True -> reinicia_jogador(adversario)
@@ -1080,9 +1195,7 @@ pub fn mover_jogador(
   }
 
   let jogadores =
-    atualiza_jogador(partida.jogadores, jogador.id, fn(_) {
-      jogador_movido
-    })
+    atualiza_jogador(partida.jogadores, jogador.id, fn(_) { jogador_movido })
     |> atualiza_jogador(adversario.id, fn(_) { novo_adversario })
 
   let atualizada =
@@ -1112,10 +1225,7 @@ pub fn mover_jogador_examples() {
   let p = Partida(..p, jogadores: [j, outro])
   let eliminada = mover_jogador(p, j, Direita, outro)
 
-  check.eq(
-    busca_jogador(eliminada.jogadores, 1),
-    Ok(reinicia_jogador(j)),
-  )
+  check.eq(busca_jogador(eliminada.jogadores, 1), Ok(reinicia_jogador(j)))
 
   // Cortar o rastro adversário elimina o dono daquele rastro.
   let j = Jogador(..cria_jogador(1), posicao: Posicao(5, 5))
@@ -1123,31 +1233,34 @@ pub fn mover_jogador_examples() {
   let p = Partida(..nova_partida(), jogadores: [j, outro])
   let cortada = mover_jogador(p, j, Direita, outro)
 
-  check.eq(
-    busca_jogador(cortada.jogadores, 2),
-    Ok(reinicia_jogador(outro)),
-  )
+  check.eq(busca_jogador(cortada.jogadores, 2), Ok(reinicia_jogador(outro)))
 
   // Quando entra na casa de um poder, guarda ele e o remove do mapa.
   let outro = cria_jogador(2)
   let p =
-    Partida(
-      ..nova_partida(),
-      jogadores: [j, outro],
-      poderes: [PoderNoMapa(Velocidade, Posicao(5, 6))],
-    )
+    Partida(..nova_partida(), jogadores: [j, outro], poderes: [
+      PoderNoMapa(Velocidade, Posicao(5, 6)),
+    ])
   let coletada = mover_jogador(p, j, Direita, outro)
 
   check.eq(
     busca_jogador(coletada.jogadores, 1),
-    Ok(Jogador(
-      ..j,
-      posicao: Posicao(5, 6),
-      rastro: [Posicao(5, 6)],
-      poderes_guardados: [Velocidade],
-    )),
+    Ok(
+      Jogador(
+        ..j,
+        posicao: Posicao(5, 6),
+        ultima_direcao: Direita,
+        rastro: [Posicao(5, 6)],
+        poderes_guardados: [Velocidade],
+      ),
+    ),
   )
   check.eq(coletada.poderes, [])
+
+  // Um movimento bloqueado não altera a última direção realizada.
+  let j = Jogador(..cria_jogador(1), posicao: Posicao(tamanho - 1, 0))
+  let p = Partida(..nova_partida(), jogadores: [j, outro])
+  check.eq(mover_jogador(p, j, Esquerda, outro), p)
 }
 
 /// Conquista o rastro e as casas cercadas ao voltar ao
@@ -1493,14 +1606,7 @@ pub fn conexoes_linha(
   linha: Int,
   pendentes: List(Posicao),
 ) -> List(Posicao) {
-  procurar_conexoes(
-    mascara,
-    linha,
-    trecho.inicio,
-    trecho.fim,
-    True,
-    pendentes,
-  )
+  procurar_conexoes(mascara, linha, trecho.inicio, trecho.fim, True, pendentes)
 }
 
 pub fn conexoes_linha_examples() {
@@ -1699,7 +1805,6 @@ pub fn pintar_mapa_examples() {
   ])
 }
 
-
 // ----------------------------------------------------------------------
 // Poderes
 // ----------------------------------------------------------------------
@@ -1726,14 +1831,16 @@ pub fn remover_poder_examples() {
 }
 
 /// Conquista as casas da área 3x3 com centro na posição de *j*,
-/// preservando a base adversária. Devolve a partida com o mapa
-/// e os placares atualizados.
+/// preservando a base adversária. Se o jogador passar a estar em
+/// território próprio com rastro ativo, fecha o rastro imediatamente.
+/// Devolve a partida com o mapa, o rastro e os placares atualizados.
 pub fn ativar_expansao(j: Jogador, partida: Partida) -> Partida {
-  let base_adversaria =
-    case list.find(partida.jogadores, fn(outro) { outro.id != j.id }) {
-      Ok(adversario) -> adversario.base
-      Error(_) -> []
-    }
+  let base_adversaria = case
+    list.find(partida.jogadores, fn(outro) { outro.id != j.id })
+  {
+    Ok(adversario) -> adversario.base
+    Error(_) -> []
+  }
   let mapa =
     list.map(partida.mapa, fn(casa) {
       let perto =
@@ -1748,7 +1855,20 @@ pub fn ativar_expansao(j: Jogador, partida: Partida) -> Partida {
       }
     })
 
-  atualizar_placares(Partida(..partida, mapa: mapa))
+  let expandida = Partida(..partida, mapa: mapa)
+
+  case j.rastro != [] && dono_da_casa(mapa, j.posicao) == Some(j.id) {
+    False -> atualizar_placares(expandida)
+    True -> {
+      let mapa = fechar_rastro(expandida, j)
+      let jogadores =
+        atualiza_jogador(expandida.jogadores, j.id, fn(jogador) {
+          Jogador(..jogador, rastro: [])
+        })
+
+      atualizar_placares(Partida(..expandida, mapa: mapa, jogadores: jogadores))
+    }
+  }
 }
 
 pub fn ativar_expansao_examples() {
@@ -1764,11 +1884,35 @@ pub fn ativar_expansao_examples() {
 
   // A expansão não atinge a base adversária
   check.eq(ativar_expansao(j, nova_partida()).mapa, nova_partida().mapa)
+
+  // A expansão fecha o rastro e conquista a área cercada.
+  let j =
+    Jogador(..cria_jogador(1), posicao: Posicao(tamanho - 4, 4), rastro: [
+      Posicao(tamanho - 4, 4),
+      Posicao(tamanho - 5, 4),
+      Posicao(tamanho - 6, 4),
+      Posicao(tamanho - 6, 3),
+      Posicao(tamanho - 6, 2),
+      Posicao(tamanho - 6, 1),
+      Posicao(tamanho - 5, 1),
+      Posicao(tamanho - 4, 1),
+    ])
+  let p = Partida(..nova_partida(), jogadores: [j, cria_jogador(2)])
+  let expandida = ativar_expansao(j, p)
+  check.eq(busca_jogador(expandida.jogadores, 1), Ok(Jogador(..j, rastro: [])))
+  check.eq(dono_da_casa(expandida.mapa, Posicao(tamanho - 5, 2)), Some(1))
+  check.eq(dono_da_casa(expandida.mapa, Posicao(tamanho - 6, 2)), Some(1))
+  check.eq(dono_da_casa(expandida.mapa, Posicao(tamanho - 7, 2)), None)
+  check.eq(expandida.placares, [
+    Placar(1, conta_casas(expandida, j)),
+    Placar(2, 9),
+  ])
 }
 
 /// Ativa o poder se ele estiver guardado no inventário do jogador.
 /// Aplica o efeito e consome o poder. Se o jogador não existir, ou
-/// não possuir o poder, mantém a partida.
+/// não possuir o poder, mantém a partida. Um efeito de velocidade
+/// ativo impede a utilização de outro poder de velocidade.
 pub fn ativar_poder(
   partida: Partida,
   jogador_id: Int,
@@ -1777,7 +1921,9 @@ pub fn ativar_poder(
   case busca_jogador(partida.jogadores, jogador_id) {
     Error(_) -> partida
     Ok(jogador) -> {
-      case list.contains(jogador.poderes_guardados, tipo) {
+      let boost_ativo = tipo == Velocidade && jogador.velocidade_extra > 0
+
+      case list.contains(jogador.poderes_guardados, tipo) && !boost_ativo {
         False -> partida
         True -> {
           let jogador =
@@ -1790,23 +1936,19 @@ pub fn ativar_poder(
             Velocidade ->
               Jogador(
                 ..jogador,
-                velocidade: velocidade_boost,
-                velocidade_extra: boost_tempo,
+                velocidade_extra: boost_segundos * tiques_por_segundo,
               )
             Expansao -> jogador
           }
 
-          let atualizada = case tipo {
-            Expansao -> ativar_expansao(jogador, partida)
-            Velocidade -> partida
-          }
-
           let jogadores =
-            atualiza_jogador(atualizada.jogadores, jogador_id, fn(_) {
-              jogador
-            })
+            atualiza_jogador(partida.jogadores, jogador_id, fn(_) { jogador })
+          let atualizada = Partida(..partida, jogadores: jogadores)
 
-          Partida(..atualizada, jogadores: jogadores)
+          case tipo {
+            Expansao -> ativar_expansao(jogador, atualizada)
+            Velocidade -> atualizada
+          }
         }
       }
     }
@@ -1833,11 +1975,45 @@ pub fn ativar_poder_examples() {
       Jogador(
         ..j,
         poderes_guardados: [Velocidade],
-        velocidade: velocidade_boost,
-        velocidade_extra: boost_tempo,
+        velocidade_extra: boost_segundos * tiques_por_segundo,
       ),
     ),
   )
+
+  // Não consome outro poder enquanto o efeito está ativo.
+  check.eq(ativar_poder(acelerada, 1, Velocidade), acelerada)
+
+  // Pode utilizar outro poder de velocidade após o efeito terminar.
+  let j = Jogador(..j, poderes_guardados: [Velocidade])
+  let p = Partida(..p, jogadores: [j, cria_jogador(2)])
+  let acelerada = ativar_poder(p, 1, Velocidade)
+  check.eq(
+    busca_jogador(acelerada.jogadores, 1),
+    Ok(
+      Jogador(
+        ..j,
+        poderes_guardados: [],
+        velocidade_extra: boost_segundos * tiques_por_segundo,
+      ),
+    ),
+  )
+
+  // Consumir a expansão não restaura o rastro que ela acabou de fechar.
+  let j =
+    Jogador(
+      ..cria_jogador(1),
+      posicao: Posicao(tamanho - 4, 1),
+      rastro: [Posicao(tamanho - 4, 1)],
+      poderes_guardados: [Expansao, Velocidade],
+      velocidade_extra: 1,
+    )
+  let p = Partida(..nova_partida(), jogadores: [j, cria_jogador(2)])
+  let expandida = ativar_poder(p, 1, Expansao)
+  check.eq(
+    busca_jogador(expandida.jogadores, 1),
+    Ok(Jogador(..j, rastro: [], poderes_guardados: [Velocidade])),
+  )
+  check.eq(dono_da_casa(expandida.mapa, j.posicao), Some(1))
 }
 
 // ----------------------------------------------------------------------
@@ -1897,11 +2073,18 @@ pub fn cor_rastro_examples() {
 /// Desenha a tela do *estado* para o jogador com id *id*.
 pub fn tela(estado: Estado, id: Int) -> Image {
   let conteudo = case estado {
-    Abertura(_, _) -> tela_abertura(id)
+    Abertura(_, imagens) -> tela_abertura(id, imagens)
     EmPartida(_, imagens, partida) -> tela_partida(imagens, partida, id)
     Resultado(_, _, jogadores) -> tela_resultado(jogadores, id)
   }
-  image.overlay(conteudo, image.rectangle(largura, altura, fill.white))
+  image.overlay(
+    conteudo,
+    image.rectangle(
+      tamanho * lado_casa,
+      tamanho * lado_casa + altura_extra,
+      fill.white,
+    ),
+  )
 }
 
 /// Desenha a casa com a cor do seu dono e uma borda da mesma cor.
@@ -1959,6 +2142,28 @@ pub fn desenha_poder(imagens: ImagensPoderes, tipo: TipoPoder) -> Image {
     Expansao -> imagens.expansao
     Velocidade -> imagens.velocidade
   }
+}
+
+/// Devolve o ícone de 18x18 pixels do poder para uso no tabuleiro.
+pub fn desenha_poder_mapa(imagens: ImagensPoderes, tipo: TipoPoder) -> Image {
+  case tipo {
+    Expansao -> imagens.expansao_mapa
+    Velocidade -> imagens.velocidade_mapa
+  }
+}
+
+pub fn desenha_poder_mapa_examples() {
+  let velocidade = image.square(18, fill.black)
+  let expansao = image.square(18, fill.white)
+  let imagens =
+    ImagensPoderes(
+      velocidade: image.square(28, fill.black),
+      expansao: image.square(28, fill.white),
+      velocidade_mapa: velocidade,
+      expansao_mapa: expansao,
+    )
+  check.same(desenha_poder_mapa(imagens, Velocidade), velocidade)
+  check.same(desenha_poder_mapa(imagens, Expansao), expansao)
 }
 
 /// Coloca uma imagem no centro de uma posição do mapa.
@@ -2020,7 +2225,7 @@ pub fn grade(partida: Partida, imagens_poderes: ImagensPoderes) -> Image {
     coloca_img(
       imagem,
       poder.posicao,
-      desenha_poder(imagens_poderes, poder.tipo),
+      desenha_poder_mapa(imagens_poderes, poder.tipo),
     )
   })
   |> list.fold(partida.jogadores, _, fn(cena, j) {
@@ -2035,35 +2240,107 @@ pub fn grade(partida: Partida, imagens_poderes: ImagensPoderes) -> Image {
 // Desenho - Telas
 // ----------------------------------------------------------------------
 
-/// Desenha a tela de abertura, com identificação do jogador, instruções para
-/// começar a partida e instruções de como jogar.
-pub fn tela_abertura(id: Int) -> Image {
-  image.text("Disputa de Território", 32, fill.black)
-  |> image.above(
-    image.text(
+/// Desenha a abertura com identificação do jogador, regras e controles
+/// organizados em seções, além dos ícones e instruções dos poderes.
+pub fn tela_abertura(id: Int, imagens: ImagensPoderes) -> Image {
+  let espaco = image.rectangle(1, 14, fill.white)
+  let espaco_menor = image.rectangle(1, 6, fill.white)
+
+  let titulo =
+    image.text("DISPUTA DE TERRITÓRIO", 25, fill.black)
+    |> image.above(espaco_menor)
+    |> image.above(image.text(
       "Você é o jogador " <> int.to_string(id),
-      22,
+      20,
       style.fill(cor(id)),
-    ),
-  )
-  |> image.above(
-    image.text("Conquiste mais casas em 60 segundos!", 18, fill.black),
-  )
-  |> image.above(
-    image.text("Saia do seu território e volte para cercar casas.", 16, fill.black),
-  )
-  |> image.above(
-    image.text("Evite seu rastro e corte o do adversário.", 16, fill.black),
-  )
-  |> image.above(
-    image.text("Setas: mudar direção. Colete e guarde poderes.", 16, fill.black),
-  )
-  |> image.above(
-    image.text("1: expansão 3x3. 2: velocidade por 4 s.", 16, fill.black),
-  )
-  |> image.above(
-    image.text("Pressione Enter para começar.", 20, fill.black),
-  )
+    ))
+
+  let regras =
+    image.text("OBJETIVO", 18, fill.black)
+    |> image.above(espaco_menor)
+    |> image.above(image.text(
+      "Conquiste mais casas em "
+        <> int.to_string(duracao_segundos)
+        <> " segundos!",
+      15,
+      fill.black,
+    ))
+    |> image.above(image.text(
+      "Saia do seu território e volte para",
+      15,
+      fill.black,
+    ))
+    |> image.above(image.text(
+      "conquistar o rastro e a área cercada.",
+      15,
+      fill.black,
+    ))
+    |> image.above(image.text(
+      "Evite seu rastro e corte o do adversário.",
+      15,
+      fill.black,
+    ))
+
+  let controles =
+    image.text("CONTROLES", 18, fill.black)
+    |> image.above(espaco_menor)
+    |> image.above(image.text(
+      "Setas: altere a direção do jogador.",
+      15,
+      fill.black,
+    ))
+    |> image.above(image.text("O movimento é automático.", 15, fill.black))
+
+  let expansao =
+    image.beside(
+      desenha_poder(imagens, Expansao),
+      image.rectangle(8, 1, fill.white),
+    )
+    |> image.beside(image.text("1 - Expansão (área 3x3)", 16, fill.black))
+
+  let velocidade =
+    image.beside(
+      desenha_poder(imagens, Velocidade),
+      image.rectangle(8, 1, fill.white),
+    )
+    |> image.beside(image.text(
+      "2 - Velocidade (" <> int.to_string(boost_segundos) <> " s)",
+      16,
+      fill.black,
+    ))
+
+  let poderes =
+    image.text("PODERES", 18, fill.black)
+    |> image.above(espaco_menor)
+    |> image.above(image.text(
+      "Colete e use os poderes pelas teclas:",
+      15,
+      fill.black,
+    ))
+    |> image.above(espaco_menor)
+    |> image.above(expansao)
+    |> image.above(espaco_menor)
+    |> image.above(velocidade)
+
+  let botao =
+    image.overlay(
+      image.text("Pressione Enter para começar", 17, fill.black),
+      image.rectangle(
+        tamanho * lado_casa - 40,
+        40,
+        style.join([style.fill(color.white), style.stroke(cor(id))]),
+      ),
+    )
+
+  titulo
+  |> image.above(espaco)
+  |> image.above(regras)
+  |> image.above(espaco)
+  |> image.above(controles)
+  |> image.above(espaco)
+  |> image.above(poderes)
+  |> image.above(espaco)
+  |> image.above(botao)
 }
 
 /// Desenha o tempo, os placares e o tabueiro do jogo durante a
@@ -2076,7 +2353,14 @@ pub fn tela_partida(
   let jogador = busca_jogador(partida.jogadores, id)
 
   let segundos =
-    { duracao - partida.tiques + tiques_por_segundo - 1 } / tiques_por_segundo
+    {
+      duracao_segundos
+      * tiques_por_segundo
+      - partida.tiques
+      + tiques_por_segundo
+      - 1
+    }
+    / tiques_por_segundo
 
   let poderes = case jogador {
     Ok(j) -> {
@@ -2107,7 +2391,7 @@ pub fn tela_partida(
   }
 
   let espaco_poderes =
-    image.overlay(poderes, image.rectangle(largura, 36, fill.white))
+    image.overlay(poderes, image.rectangle(tamanho * lado_casa, 36, fill.white))
 
   let placar =
     list.fold(partida.placares, image.empty, fn(cena, p) {
