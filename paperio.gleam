@@ -18,7 +18,7 @@
 //   mantém seus territórios e reaparece após 2 segundos em sua base.
 // - Encostar diretamente no personagem adversário não elimina.
 // - A cada 8 segundos, um poder aleatório pode aparecer em uma casa
-//   sem jogador. Podem existir no máximo dois poderes no mapa.
+//   sem jogador nem outro poder, sem limite de poderes no mapa.
 // - Os poderes são coletados ao passar pela casa e ficam guardados
 //   até serem utilizados.
 // - Expansão: conquista as casas de uma área 3x3 ao redor do personagem,
@@ -30,7 +30,7 @@
 //
 // Controles
 //
-// - Enter: começa a partida (na abertura) ou joga novamente (no resultado).
+// - Enter: começa a partida na abertura ou volta à abertura no resultado.
 // - Setas: movimentam o personagem uma casa nas quatro direções.
 // - Tecla 1: utiliza um poder de expansão armazenado.
 // - Tecla 2: utiliza um poder de velocidade armazenado.
@@ -145,10 +145,14 @@ pub type Jogador {
   )
 }
 
-/// Uma partida em andamento. *mapa* contém as casas e seus proprietários,
-/// *jogadores* guarda os participantes e *poderes* contém os poderes
-/// disponíveis. *tiques* conta o tempo desde o início da partida e
-/// *proximo_poder* indica os tiques restantes até surgir outro poder.
+/// Guarda as informações da partida
+///
+/// - *mapa*: casas do tabuleiro e seus donos.
+/// - *jogadores*: jogadores e suas informações.
+/// - *poderes*: poderes que estão no mapa.
+/// - *tiques*: tempo passado desde o início, em tiques.
+/// - *proximo_poder*: tiques que faltam para tentar colocar outro poder.
+/// - *placares*: quantidade de casas de cada jogador.
 pub type Partida {
   Partida(
     mapa: List(Casa),
@@ -189,14 +193,14 @@ pub type Estado {
 // Funções auxiliares
 // ----------------------------------------------------------------------
 
-/// Aplica a função *f* apenas ao jogador com *id* igual a *jogador_id*.
+/// Aplica a função *f* apenas ao jogador com id igual a *id*.
 fn atualiza_jogador(
   jogadores: List(Jogador),
-  jogador_id: Int,
+  id: Int,
   f: fn(Jogador) -> Jogador,
 ) -> List(Jogador) {
   list.map(jogadores, fn(j) {
-    case j.id == jogador_id {
+    case j.id == id {
       True -> f(j)
       False -> j
     }
@@ -323,6 +327,8 @@ pub fn cria_mapa_examples() {
   check.eq(list.count(mapa, fn(casa) { casa.dono != None }), 0)
 }
 
+// Define a base inical dos jogadores, de acordo com o *id* de
+// cada um.
 pub fn base_inicial(id: Int) -> List(Posicao) {
   let colunas = case id {
     1 -> sequencia(0, 2)
@@ -350,6 +356,8 @@ pub fn base_inicial_examples() {
   check.eq(base_inicial(3), [])
 }
 
+/// Cria o jogador *id* no centro da sua base, com a direção inicial
+/// e velocidade normal, sem rastro e poderes.
 pub fn cria_jogador(id: Int) -> Jogador {
   let base = base_inicial(id)
 
@@ -381,7 +389,7 @@ pub fn cria_jogador_examples() {
   check.eq(j1.velocidade, velocidade_cobra)
 }
 
-/// Define a direção inicial baseada no **id** do jogador.
+/// Define a direção inicial baseada no *id* do jogador.
 pub fn direcao_inicial(id: Int) -> Direcao {
   case id {
     1 -> Cima
@@ -395,6 +403,9 @@ pub fn direcao_inicial_examples() {
   check.eq(direcao_inicial(0), Baixo)
 }
 
+/// Começa uma partida com dois jogadores e suas bases.
+/// As outras casas ficam neutras, sem poderes no mapa e com o relógio zerado.
+/// Inicia a espera pelo primeiro poder e conta os pontos de cada jogador.
 pub fn nova_partida() -> Partida {
   let base1 = base_inicial(1)
   let base2 = base_inicial(2)
@@ -444,7 +455,7 @@ pub fn nova_partida_examples() {
 // Teclas
 // ----------------------------------------------------------------------
 
-/// Verifica se duas direções são opostas entre si.
+/// Verifica se duas direções são opostas.
 pub fn sao_opostas(dir1: Direcao, dir2: Direcao) -> Bool {
   case dir1, dir2 {
     Cima, Baixo | Baixo, Cima -> True
@@ -461,14 +472,16 @@ pub fn sao_opostas_examples() {
   check.eq(sao_opostas(Cima, Cima), False)
 }
 
-/// Troca a direção do jogador correspondente
-fn guardar_direcao(
+/// Muda a direção do jogador com id *id*, desde que ele não esteja
+/// esperando para reaparecer nem tente virar para a direção oposta.
+/// Caso contrário, mantém a partida como está.
+pub fn guardar_direcao(
   partida: Partida,
-  jogador_id: Int,
+  id: Int,
   nova_direcao: Direcao,
 ) -> Partida {
   let jogadores =
-    atualiza_jogador(partida.jogadores, jogador_id, fn(j) {
+    atualiza_jogador(partida.jogadores, id, fn(j) {
       case j.reaparecimento == 0 && !sao_opostas(j.direcao, nova_direcao) {
         True -> Jogador(..j, direcao: nova_direcao)
         False -> j
@@ -516,20 +529,27 @@ pub fn direcao_examples() {
   check.eq(direcao(key.Enter), None)
 }
 
-pub fn processa_tecla(estado: Estado, numero: Int, tecla: key.Event) -> Estado {
+/// Processa a tecla que o jogador *id* pressionou
+///
+/// - Enter começa o jogo ou, se a partida acabou, volta à abertura.
+/// - Na partida, 1 usa expansão e 2 usa velocidade, se tiver o poder guardado.
+/// - As setas escolhem para onde o jogador vai se mover.
+///
+/// Se a tecla não tiver uma ação nesse estado, nada muda.
+pub fn processa_tecla(estado: Estado, id: Int, tecla: key.Event) -> Estado {
   case estado, tecla {
     Abertura(gerador, imagens), key.Enter ->
       EmPartida(gerador, imagens, nova_partida())
     Resultado(gerador, imagens, _), key.Enter ->
       Abertura(gerador, imagens)
     EmPartida(gerador, imagens, partida), key.Char("1") ->
-      EmPartida(gerador, imagens, ativar_poder(partida, numero, Expansao))
+      EmPartida(gerador, imagens, ativar_poder(partida, id, Expansao))
     EmPartida(gerador, imagens, partida), key.Char("2") ->
-      EmPartida(gerador, imagens, ativar_poder(partida, numero, Velocidade))
+      EmPartida(gerador, imagens, ativar_poder(partida, id, Velocidade))
     EmPartida(gerador, imagens, partida), _ ->
       case direcao(tecla) {
         Some(dir) ->
-          EmPartida(gerador, imagens, guardar_direcao(partida, numero, dir))
+          EmPartida(gerador, imagens, guardar_direcao(partida, id, dir))
         None -> estado
       }
     _, _ -> estado
@@ -608,6 +628,9 @@ pub fn casas_livres_examples() {
   check.eq(list.contains(casas_livres(p), livre), False)
 }
 
+/// Sorteia entre Velocidade e Expansao e devolve o tipo junto
+/// com o gerador atualizado. Se o sorteio falhar, usa Velocidade
+/// como default.
 pub fn sorteia_tipo(gerador: Generator) -> #(TipoPoder, Generator) {
   let tipos = [Velocidade, Expansao]
 
@@ -662,8 +685,17 @@ pub fn sorteia_poder_examples() {
   check.eq(poderes, p.poderes)
 }
 
-/// Avança um tique da partida e mostra o resultado
-/// quando a duração é atingida.
+/// Avança a partida em um tique.
+///
+/// - Se o tempo acabou, passa para o resultado.
+/// - Diminui a espera para reaparecer.
+/// - Move cada jogador conforme sua direção e velocidade.
+/// - Diminui o tempo do poder de velocidade. Quando acaba,
+///   o jogador volta à velocidade normal.
+/// - Diminui a espera pelo próximo poder. Quando chega a zero,
+///   tenta colocar um no mapa e reinicia a espera.
+///
+/// Devolve a partida atualizada ou a tela de resultado.
 pub fn avanca(gerador: Generator, imagens: ImagensPoderes, partida: Partida) {
   let tiques = partida.tiques + 1
 
@@ -773,9 +805,9 @@ pub fn avanca_examples() {
   )
 }
 
-/// Recalcula os placares da *partida* contando as casas
-/// de cada jogador. Mantém a ordem dos jogadores e
-/// preserva os demais campos da partida.
+/// Recalcula os placares da *partida* contando as casas de cada
+/// jogador. Mantém a ordem dos jogadores e não muda os demais
+/// campos da partida.
 pub fn atualizar_placares(partida: Partida) -> Partida {
   let placares =
     list.map(partida.jogadores, fn(jogador) {
@@ -843,8 +875,10 @@ pub fn dentro_do_mapa_examples() {
   check.eq(dentro_do_mapa(Posicao(5, -1)), False)
 }
 
-/// Calcula o destino, bloqueando as bordas, a base adversária e
-/// um adversário ativo. None indica que ele está fora de jogo.
+/// Devolve a posição uma casa na direção indicada. Mantém *pos* se
+/// o destino ficar fora do mapa, na base adversária ou na posição do
+/// adversário ativo. *adversario_pos* é None quando o adversário
+/// não está no jogo.
 pub fn desloca(
   pos: Posicao,
   dir: Direcao,
@@ -883,8 +917,8 @@ pub fn desloca_examples() {
   check.eq(desloca(pos, Direita, [], Some(Posicao(5, 6))), pos)
 }
 
-/// Devolve o dono da casa na posição pos.
-/// Devolve None se a casa for neutra ou não estiver no mapa.
+/// Devolve o dono da casa na posição pos. Retorna None se a casa for neutra
+/// ou não estiver no mapa.
 pub fn dono_da_casa(mapa: List(Casa), pos: Posicao) -> Option(Int) {
   case list.find(mapa, fn(casa) { casa.posicao == pos }) {
     Ok(casa) -> casa.dono
@@ -926,10 +960,13 @@ pub fn move_examples() {
 }
 
 
-/// Reinicia o jogador após ser eliminado. Posiciona-o no centro da base,
-/// restaura a direção inicial, limpa o rastro e os poderes e restaura a
-/// velocidade padrão. Preserva o território conquistado e inicia
-/// a espera de dois segundos para reaparecer.
+/// Reinicia o jogador após a eliminação
+///
+/// - Volta ao centro da base, com a direção e a velocidade dafaults.
+/// - Limpa o rastro, os poderes guardados e o efeito de velocidade.
+/// - Define uma espera de dois segundos para reaparecer.
+///
+/// O território conquistado permanece no mapa.
 pub fn reinicia_jogador(jogador: Jogador) -> Jogador {
   let jogador_inicial = cria_jogador(jogador.id)
 
@@ -957,9 +994,17 @@ pub fn reinicia_jogador_examples() {
 }
 
 
-/// Atualiza a posição e o rastro do jogador.
-/// Se ele voltar ao próprio território com um rastro,
-/// transforma o caminho em território e limpa o rastro.
+/// Move o jogador na direção indicada e atualiza a partida, respeitando
+/// as bordas e as bases
+///
+/// - Deixa rastro ao andar fora do próprio território.
+/// - Ao voltar ao território, conquista o rastro e as casas cercadas,
+///   limpa o rastro e atualiza os placares.
+///
+/// - Elimina o jogador se entrar no próprio rastro fora do território.
+/// - Elimina o adversário se cortar o rastro dele.
+///
+/// - Guarda poder encontrado e o remove do mapa.
 pub fn mover_jogador(
   partida: Partida,
   jogador: Jogador,
@@ -980,10 +1025,18 @@ pub fn mover_jogador(
     )
 
   let moveu = nova_pos != jogador.posicao
-  let cortou_rastro = moveu && list.contains(jogador.rastro, nova_pos)
+
+  let voltou_area =
+    dono_da_casa(partida.mapa, nova_pos) == Some(jogador.id)
+
+  let cortou_rastro =
+    moveu
+    && !voltou_area
+    && list.contains(jogador.rastro, nova_pos)
+
   let cortou_rastro_adversario =
     moveu && list.contains(adversario.rastro, nova_pos)
-  let voltou_area = dono_da_casa(partida.mapa, nova_pos) == Some(jogador.id)
+
   let fechou_rastro = moveu && voltou_area && jogador.rastro != []
 
   let poder = case moveu {
@@ -1097,8 +1150,8 @@ pub fn mover_jogador_examples() {
   check.eq(coletada.poderes, [])
 }
 
-/// Conquista o rastro e as casas cercadas ao voltar
-/// ao território do jogador.
+/// Conquista o rastro e as casas cercadas ao voltar ao
+/// território do jogador.
 pub fn fechar_rastro(partida: Partida, jogador: Jogador) -> List(Casa) {
   criar_mascara(partida, jogador)
   |> casas_exteriores
@@ -1122,8 +1175,8 @@ pub fn fechar_rastro_examples() {
   ])
 }
 
-/// Mantém o rastro dentro do próprio território ou
-/// adiciona a posição quando o jogador está fora dele.
+/// Mantém o rastro dentro do próprio território ou adiciona a
+/// posição quando o jogador está fora dele.
 pub fn atualizar_rastro(
   partida: Partida,
   jogador: Jogador,
@@ -1175,16 +1228,17 @@ pub fn adicionar_rastro_examples() {
 // Flood Fill
 // ----------------------------------------------------------------------
 
-/// Estado de uma casa na máscara
+/// Indica se a casa ainda precisa ser explorada, pertence
+/// ao território ou rastro do jogador, ou foi alcançada
+/// pelo fill a partir das bordas.
 pub type EstadoCasa {
   NaoExplorada
   TerritorioOuRastro
   Exterior
 }
 
-/// Cria a máscara na mesma ordem das casas do mapa.
-/// O território e o rastro do jogador formam a barreira.
-/// As outras casas começam como não exploradas.
+/// Cria a máscara na ordem do mapa, marcando as casas do jogador
+/// e seu rastro como TerritorioOuRastro e as demais como NaoExplorada.
 pub fn criar_mascara(partida: Partida, jogador: Jogador) -> List(EstadoCasa) {
   list.map(partida.mapa, fn(casa) {
     case
@@ -1214,9 +1268,9 @@ pub fn criar_mascara_examples() {
   ])
 }
 
-/// Retorna True se a posição não pode ser explorada,
-/// ou seja, se está fora do mapa, é território ou
-/// rastro, ou se já foi explorada
+/// Devolve True se o fill não pode explorar *pos*, ou seja, ela
+/// está fora do mapa, não existe na máscara ou já está como
+/// TerritorioOuRastro ou Exterior.
 pub fn marcada(mascara: List(EstadoCasa), pos: Posicao) -> Bool {
   case dentro_do_mapa(pos) {
     False -> True
@@ -1248,8 +1302,8 @@ pub fn marcada_examples() {
   check.eq(marcada(mascara, Posicao(0, tamanho)), True)
 }
 
-/// Devolve o elemento no índice *indice*. Caso
-/// o índice não existir, devolve *default*
+/// Devolve o elemento no índice *indice*. Caso o índice não
+/// existir, devolve *default*
 pub fn consultar_indice(lista: List(a), indice: Int, default: a) -> a {
   case lista, indice {
     [primeiro, ..], 0 -> primeiro
@@ -1267,7 +1321,8 @@ pub fn consultar_indice_examples() {
   check.eq(consultar_indice([10], -1, 0), 0)
 }
 
-/// Devolve as posições não exploradas nas quatro bordas.
+/// Devolve as casas das bordas por onde o fill pode começar,
+/// ou seja, NaoExplorada na máscara.
 pub fn bordas_livres(mascara: List(EstadoCasa)) -> List(Posicao) {
   list.filter(todas_as_casas(), fn(pos) {
     let borda =
@@ -1300,8 +1355,8 @@ pub type Trecho {
   Trecho(linha: Int, inicio: Int, fim: Int)
 }
 
-/// Encontra o limite do trecho não explorado na direção indicada.
-/// A posição inicial deve ser não explorada.
+/// Devolve a coluna onde o trecho termina, pela esquerda ou
+/// pela direita. A casa em *pos* deve estar livre para explorar.
 pub fn limite_trecho(
   mascara: List(EstadoCasa),
   pos: Posicao,
@@ -1336,7 +1391,7 @@ pub fn limite_trecho_examples() {
   check.eq(limite_trecho([NaoExplorada], Posicao(0, 0), Esquerda), 0)
 }
 
-/// Encontra o trecho não explorado que contém pos
+/// Encontra o trecho horizontal de casas não exploradas que contém *pos*.
 pub fn encontrar_trecho(mascara: List(EstadoCasa), pos: Posicao) -> Trecho {
   Trecho(
     linha: pos.lin,
@@ -1359,7 +1414,7 @@ pub fn encontrar_trecho_examples() {
   )
 }
 
-/// Marca todas as casas do trecho como exteriores.
+/// Marca todas as casas do trecho como Exterior na máscara.
 pub fn marcar_trecho(
   mascara: List(EstadoCasa),
   trecho: Trecho,
@@ -1381,8 +1436,9 @@ pub fn marcar_trecho_examples() {
   )
 }
 
-/// Percorre a máscara a partir de indice, colocando True
-/// entre inicio e fim.
+/// Marca como Exterior as casas entre os índices *inicio* e *fim*,
+/// e preserva as demais. *indice* indica a posição do primeiro elemento
+/// da lista recebida.
 pub fn marcar_intervalo(
   mascara: List(EstadoCasa),
   indice: Int,
@@ -1428,6 +1484,7 @@ pub fn marcar_intervalo_examples() {
   // Sem casa para marcar
   check.eq(marcar_intervalo([], 0, 0, 1), [])
 }
+
 /// Adiciona às pendentes o começo de cada grupo não explorado
 /// na linha, entre as colunas inicial e final do trecho.
 pub fn conexoes_linha(
@@ -1473,8 +1530,10 @@ pub fn conexoes_linha_examples() {
   ])
 }
 
-/// Percorre a linha da coluna atual até fim, guardando em
-/// pendentes a primeira posição de cada grupo não explorado.
+/// Percorre a linha de *coluna* até *fim*, e adiciona nas pendentes o início de
+/// cada sequência de casas não exploradas. *marcar_inicio* indica se o grupo atual
+/// ainda precisa ser registrado. Após uma casa bloqueada, o próximo grupo deve ser
+/// registrado.
 fn procurar_conexoes(
   mascara: List(EstadoCasa),
   linha: Int,
@@ -1571,8 +1630,9 @@ pub fn scanline_fill_examples() {
   )
 }
 
-/// Marca as casas alcançáveis pelas quatro bordas,
-/// sem atravessar o território nem o rastro do jogador.
+/// Devolve a máscara com as casas alcançáveis pelas quatro bordas
+/// marcadas como Exterior, sem atravessar o território nem o rastro
+/// do jogador.
 pub fn casas_exteriores(mascara: List(EstadoCasa)) -> List(EstadoCasa) {
   bordas_livres(mascara)
   |> scanline_fill(mascara, _)
@@ -1595,8 +1655,9 @@ pub fn casas_exteriores_examples() {
   )
 }
 
-/// Não muda o dono das casas exteriores e conquista o resto.
-/// Após o fill, NaoExplorada representa uma casa cercada.
+/// Conquista para *jogador_id* as casas que não são Exterior na máscara,
+/// mantendo o dono das casas exteriores. As duas listas devem representar
+/// as mesmas posições, na mesma ordem.
 pub fn pintar_mapa(
   casas: List(Casa),
   mascara: List(EstadoCasa),
@@ -1642,6 +1703,9 @@ pub fn pintar_mapa_examples() {
 // ----------------------------------------------------------------------
 // Poderes
 // ----------------------------------------------------------------------
+
+/// Remove a primeira ocorrência de *tipo* da lista *poderes*.
+/// Se o tipo não estiver na lista, devolve a lista sem alterações.
 pub fn remover_poder(
   poderes: List(TipoPoder),
   tipo: TipoPoder,
@@ -1661,6 +1725,9 @@ pub fn remover_poder_examples() {
   check.eq(remover_poder([Velocidade, Velocidade], Velocidade), [Velocidade])
 }
 
+/// Conquista as casas da área 3x3 com centro na posição de *j*,
+/// preservando a base adversária. Devolve a partida com o mapa
+/// e os placares atualizados.
 pub fn ativar_expansao(j: Jogador, partida: Partida) -> Partida {
   let base_adversaria =
     case list.find(partida.jogadores, fn(outro) { outro.id != j.id }) {
@@ -1700,8 +1767,8 @@ pub fn ativar_expansao_examples() {
 }
 
 /// Ativa o poder se ele estiver guardado no inventário do jogador.
-/// Aplica o efeito e consome uma unidade; se o jogador não existir
-/// ou não possuir o poder, mantém a partida.
+/// Aplica o efeito e consome o poder. Se o jogador não existir, ou
+/// não possuir o poder, mantém a partida.
 pub fn ativar_poder(
   partida: Partida,
   jogador_id: Int,
@@ -1777,9 +1844,9 @@ pub fn ativar_poder_examples() {
 // Desenho
 // ----------------------------------------------------------------------
 
-/// Devolve a cor do jogador *numero*.
-pub fn cor(numero: Int) -> Color {
-  case numero {
+/// Devolve a cor do jogador com id *id*.
+pub fn cor(id: Int) -> Color {
+  case id {
     1 -> color.green
     2 -> color.blue
     _ -> color.purple
@@ -1795,7 +1862,7 @@ pub fn cor_examples() {
   check.eq(cor(-1), color.purple)
 }
 
-/// Produz a cor de uma casa conforme seu proprietário.
+/// Produz a cor de uma casa conforme seu dono.
 fn cor_casa(dono: Option(Int)) -> Color {
   case dono {
     Some(1) -> color.green
@@ -1811,8 +1878,8 @@ pub fn cor_casa_examples() {
   check.eq(cor_casa(Some(3)), color.white)
 }
 
-/// Produz a cor de um rastro conforme seu proprietário.
-fn cor_rastro(id: Int) -> Color {
+/// Produz a cor de um rastro conforme seu dono.
+pub fn cor_rastro(id: Int) -> Color {
   case id {
     1 -> color.springgreen
     2 -> color.powderblue
@@ -1827,7 +1894,7 @@ pub fn cor_rastro_examples() {
   check.eq(cor_rastro(0), color.white)
 }
 
-/// Desenha a tela do *estado* para o jogador *numero*.
+/// Desenha a tela do *estado* para o jogador com id *id*.
 pub fn tela(estado: Estado, id: Int) -> Image {
   let conteudo = case estado {
     Abertura(_, _) -> tela_abertura(id)
@@ -1837,7 +1904,9 @@ pub fn tela(estado: Estado, id: Int) -> Image {
   image.overlay(conteudo, image.rectangle(largura, altura, fill.white))
 }
 
-fn desenha_casa(casa: Casa) -> Image {
+/// Desenha a casa com a cor do seu dono e uma borda da mesma cor.
+/// Casas neutras ficam brancas com borda cinza.
+pub fn desenha_casa(casa: Casa) -> Image {
   image.square(
     lado_casa,
     style.join([
@@ -1868,7 +1937,8 @@ pub fn desenha_casa_examples() {
   )
 }
 
-fn desenha_rastro(id: Int) -> Image {
+/// Retorna um quadrado com a cor do rastro do jogador indicado.
+pub fn desenha_rastro(id: Int) -> Image {
   image.square(lado_casa, style.fill(cor_rastro(id)))
 }
 
@@ -1883,7 +1953,8 @@ pub fn desenha_rastro_examples() {
   )
 }
 
-fn desenha_poder(imagens: ImagensPoderes, tipo: TipoPoder) -> Image {
+/// Devolve a imagem de acordo com o tipo de poder indicado.
+pub fn desenha_poder(imagens: ImagensPoderes, tipo: TipoPoder) -> Image {
   case tipo {
     Expansao -> imagens.expansao
     Velocidade -> imagens.velocidade
@@ -1891,7 +1962,7 @@ fn desenha_poder(imagens: ImagensPoderes, tipo: TipoPoder) -> Image {
 }
 
 /// Coloca uma imagem no centro de uma posição do mapa.
-fn coloca_img(img: Image, pos: Posicao, elemento: Image) -> Image {
+pub fn coloca_img(img: Image, pos: Posicao, elemento: Image) -> Image {
   image.place_image(
     img,
     pos.col * lado_casa + lado_casa / 2,
@@ -1901,7 +1972,7 @@ fn coloca_img(img: Image, pos: Posicao, elemento: Image) -> Image {
 }
 
 /// Produz a imagem de um jogador.
-fn desenha_jogador(j: Jogador) -> Image {
+pub fn desenha_jogador(j: Jogador) -> Image {
   image.square(
     lado_casa - 8,
     style.join([
@@ -1911,7 +1982,8 @@ fn desenha_jogador(j: Jogador) -> Image {
   )
 }
 
-/// Produz a imagem do mapa com suas casas e jogadores.
+/// Produz a imagem do mapa com suas casas, as bases, os jogadores
+/// e os poderes, com *imagens_poderes*.
 pub fn grade(partida: Partida, imagens_poderes: ImagensPoderes) -> Image {
   image.rectangle(
     tamanho * lado_casa,
@@ -1920,6 +1992,22 @@ pub fn grade(partida: Partida, imagens_poderes: ImagensPoderes) -> Image {
   )
   |> list.fold(partida.mapa, _, fn(cena, casa) {
     coloca_img(cena, casa.posicao, desenha_casa(casa))
+  })
+  |> list.fold(partida.jogadores, _, fn(cena, j) {
+    let cor_base = case j.id {
+      1 -> color.darkgreen
+      2 -> color.darkblue
+      _ -> cor(j.id)
+    }
+    let quadrado =
+      image.square(
+        lado_casa,
+        style.join([style.fill(cor_base), style.stroke(cor_base)]),
+      )
+
+    list.fold(j.base, cena, fn(imagem, pos) {
+      coloca_img(imagem, pos, quadrado)
+    })
   })
   |> list.fold(partida.jogadores, _, fn(cena, j) {
     let quadrado = desenha_rastro(j.id)
@@ -1947,22 +2035,39 @@ pub fn grade(partida: Partida, imagens_poderes: ImagensPoderes) -> Image {
 // Desenho - Telas
 // ----------------------------------------------------------------------
 
-/// Mostra a identificação do jogador e como começar.
+/// Desenha a tela de abertura, com identificação do jogador, instruções para
+/// começar a partida e instruções de como jogar.
 pub fn tela_abertura(id: Int) -> Image {
-  image.above(
-    image.text("Disputa de Território", 32, fill.black),
-    image.above(
-      image.text(
-        "Você é o jogador " <> int.to_string(id),
-        22,
-        style.fill(cor(id)),
-      ),
-      image.text("Enter para começar. Setas para mover.", 20, fill.black),
+  image.text("Disputa de Território", 32, fill.black)
+  |> image.above(
+    image.text(
+      "Você é o jogador " <> int.to_string(id),
+      22,
+      style.fill(cor(id)),
     ),
+  )
+  |> image.above(
+    image.text("Conquiste mais casas em 60 segundos!", 18, fill.black),
+  )
+  |> image.above(
+    image.text("Saia do seu território e volte para cercar casas.", 16, fill.black),
+  )
+  |> image.above(
+    image.text("Evite seu rastro e corte o do adversário.", 16, fill.black),
+  )
+  |> image.above(
+    image.text("Setas: mudar direção. Colete e guarde poderes.", 16, fill.black),
+  )
+  |> image.above(
+    image.text("1: expansão 3x3. 2: velocidade por 4 s.", 16, fill.black),
+  )
+  |> image.above(
+    image.text("Pressione Enter para começar.", 20, fill.black),
   )
 }
 
-/// Mostra o tempo, os placares e o tabuleiro.
+/// Desenha o tempo, os placares e o tabueiro do jogo durante a
+/// partida.
 pub fn tela_partida(
   imagens_poderes: ImagensPoderes,
   partida: Partida,
@@ -2056,7 +2161,8 @@ pub fn tela_partida(
   image.above(cabecalho, tabuleiro)
 }
 
-/// Devolve a mensagem do resultado para o jogador indicado.
+/// Retorna a mensagem certa para o jogador com id *id*, de
+/// acordo com o placar final da partida
 pub fn mensagem_resultado(placares: List(Placar), id: Int) -> String {
   let seu_placar = list.find(placares, fn(p) { p.jogador == id })
   let adversario = list.find(placares, fn(p) { p.jogador != id })
@@ -2082,7 +2188,7 @@ pub fn mensagem_resultado_examples() {
   check.eq(mensagem_resultado(placares, 3), "Fim da partida")
 }
 
-/// Mostra o resultado e os placares finais e permite voltar à abertura.
+/// Mostra o resultado e os placares finais
 pub fn tela_resultado(placares: List(Placar), id: Int) -> Image {
   let placar =
     list.fold(placares, image.empty, fn(cena, p) {
